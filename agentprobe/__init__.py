@@ -1,5 +1,5 @@
 from .case import TestCase, Verification
-from .loop import run_cua_step
+from .loop import run_cua_step, run_case
 from .cli import main
 
 
@@ -21,14 +21,11 @@ class AndroidDriver:
         return maybe_dismiss_telemetry_consent(self.package, verbose=verbose)
 
 
-def run_case(case, driver=None, model="gpt-4o", output_dir="/tmp"):
-    return run_cua_step(
-        goal=case.instruction,
-        max_steps=case.maxSteps,
-        model=model,
-        step_label=case.name,
-        output_dir=output_dir,
-    )
-
-
-__all__ = ["TestCase", "Verification", "AndroidDriver", "run_cua_step", "run_case", "main"]
+__all__ = [
+    "TestCase",
+    "Verification",
+    "AndroidDriver",
+    "run_cua_step",
+    "run_case",
+    "main",
+]

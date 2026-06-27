@@ -2,35 +2,60 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 
+def _find_browser_runner():
+    """Locate browser/runner.ts.
+
+    The browser backend is a Bun/TypeScript directory, not a Python module, so
+    it is not shipped inside the installed Python package. It runs from a repo
+    checkout. We look, in order:
+      1. AGENTPROBE_BROWSER_DIR env var (explicit override)
+      2. <package>/../browser/runner.ts   (editable install / repo checkout)
+      3. ./browser/runner.ts              (cwd is the repo root)
+    Returns a Path or None.
+    """
+    env_dir = os.environ.get("AGENTPROBE_BROWSER_DIR")
+    candidates = []
+    if env_dir:
+        candidates.append(Path(env_dir) / "runner.ts")
+    candidates.append(Path(__file__).resolve().parent.parent / "browser" / "runner.ts")
+    candidates.append(Path.cwd() / "browser" / "runner.ts")
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
 def _run_browser(args):
     """Shell out to bun browser/runner.ts with mapped args."""
-    # Find runner.ts relative to this package
-    package_root = Path(__file__).parent.parent
-    runner = package_root / "browser" / "runner.ts"
-    if not runner.exists():
-        # Try installed location
-        runner = Path(__file__).parent.parent / "browser" / "runner.ts"
+    runner = _find_browser_runner()
+    if runner is None:
+        print(
+            "ERROR: browser backend not found.\n"
+            "The browser target runs from a repo checkout (it is a Bun/TypeScript\n"
+            "runner, not part of the installed Python package). Either:\n"
+            "  - run agentprobe from a clone of https://github.com/dzianisv/agentprobe, or\n"
+            "  - set AGENTPROBE_BROWSER_DIR to the directory containing runner.ts.\n"
+            "See docs/quickstart.md for details.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
-    if not runner.exists():
-        print(f"ERROR: browser/runner.ts not found at {runner}", file=sys.stderr)
-        sys.exit(1)
-
-    # Check bun is available
-    bun = subprocess.run(["which", "bun"], capture_output=True)
-    if bun.returncode != 0:
+    if shutil.which("bun") is None:
         print("ERROR: bun not found in PATH. Install from https://bun.sh", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
 
-    cmd = ["bun", str(runner)]
-    if args.case:
-        cmd += ["--test-case", args.case]
-    if args.extension:
-        cmd += ["--extension-path", args.extension]
+    if not args.extension:
+        print("ERROR: --extension is required for the browser target "
+              "(path to the unpacked extension).", file=sys.stderr)
+        sys.exit(2)
+
+    cmd = ["bun", str(runner), "--extension-path", args.extension, "--test-case", args.case]
     if args.output_dir:
         cmd += ["--output-dir", args.output_dir]
     if args.max_steps:
@@ -40,14 +65,23 @@ def _run_browser(args):
     sys.exit(result.returncode)
 
 
-def _run_android(args):
-    """Load case and run CUA loop for Android."""
-    from .loop import run_cua_step
+def _load_case(case_path, max_steps_override):
+    """Load a TestCase from a .py, .json, or .yaml file. Returns a TestCase."""
+    from .case import TestCase, Verification
 
-    case_path = args.case
-    goal = None
-    max_steps = args.max_steps or 30
-    step_label = "test"
+    def _from_dict(data):
+        verification = None
+        v = data.get("verification")
+        if isinstance(v, dict) and v.get("prompt"):
+            verification = Verification(prompt=v["prompt"])
+        return TestCase(
+            name=data.get("name", "test"),
+            instruction=data.get("instruction", data.get("goal", "")),
+            successCriteria=data.get("successCriteria", ""),
+            failureCriteria=data.get("failureCriteria", ""),
+            maxSteps=max_steps_override or data.get("maxSteps", 30),
+            verification=verification,
+        )
 
     if case_path.endswith(".py"):
         import importlib.util
@@ -56,63 +90,61 @@ def _run_android(args):
         spec.loader.exec_module(mod)
         case = getattr(mod, "case", None)
         if case is None:
-            # Try to find any TestCase attribute
-            from .case import TestCase
             for attr in dir(mod):
                 obj = getattr(mod, attr)
                 if isinstance(obj, TestCase):
                     case = obj
                     break
-        if case:
-            goal = case.instruction
-            max_steps = args.max_steps or case.maxSteps
-            step_label = case.name
-        else:
-            print(f"ERROR: No 'case' attribute found in {case_path}", file=sys.stderr)
-            sys.exit(1)
+        if case is None:
+            print(f"ERROR: No TestCase 'case' found in {case_path}", file=sys.stderr)
+            sys.exit(2)
+        if max_steps_override:
+            case.maxSteps = max_steps_override
+        return case
 
-    elif case_path.endswith(".json"):
+    if case_path.endswith(".json"):
         with open(case_path) as f:
-            data = json.load(f)
-        goal = data.get("instruction", data.get("goal", ""))
-        max_steps = args.max_steps or data.get("maxSteps", 30)
-        step_label = data.get("name", "test")
+            return _from_dict(json.load(f))
 
-    elif case_path.endswith((".yaml", ".yml")):
+    if case_path.endswith((".yaml", ".yml")):
         try:
             import yaml
         except ImportError:
-            print("ERROR: pyyaml required for YAML cases: pip install pyyaml", file=sys.stderr)
-            sys.exit(1)
+            print("ERROR: pyyaml required for YAML cases: pip install agentprobe[yaml]",
+                  file=sys.stderr)
+            sys.exit(2)
         with open(case_path) as f:
-            data = yaml.safe_load(f)
-        goal = data.get("instruction", data.get("goal", ""))
-        max_steps = args.max_steps or data.get("maxSteps", 30)
-        step_label = data.get("name", "test")
+            return _from_dict(yaml.safe_load(f))
 
-    else:
-        print(f"ERROR: Unsupported case format: {case_path}", file=sys.stderr)
-        sys.exit(1)
+    print(f"ERROR: Unsupported case format: {case_path}", file=sys.stderr)
+    sys.exit(2)
 
-    if not goal:
-        print("ERROR: No instruction/goal found in case", file=sys.stderr)
-        sys.exit(1)
+
+def _run_android(args):
+    """Load case and run it for Android, printing a verdict."""
+    from .loop import run_case
+
+    case = _load_case(args.case, args.max_steps)
+    if not case.instruction:
+        print("ERROR: case has no instruction/goal", file=sys.stderr)
+        sys.exit(2)
 
     model = args.model or os.environ.get("CUA_MODEL", "gpt-4o")
     output_dir = args.output_dir or "/tmp/agentprobe-output"
-    os.makedirs(output_dir, exist_ok=True)
 
-    result = run_cua_step(
-        goal=goal,
-        max_steps=max_steps,
+    result = run_case(
+        case,
         model=model,
         include_ui_xml=args.include_xml,
-        step_label=step_label,
         output_dir=output_dir,
         speed_multiplier=args.speed_multiplier or 1.0,
     )
-    print(f"Result: {result['status']} in {result['steps']} steps")
-    if result["status"] != "success":
+
+    if result.get("verdict") == "pass":
+        print(f"RESULT: pass ({result['steps']} steps)")
+        sys.exit(0)
+    else:
+        print(f"RESULT: fail ({result.get('reason', 'unknown')})")
         sys.exit(1)
 
 
@@ -131,7 +163,7 @@ def main():
     run_parser.add_argument("--model", default=None,
                             help="LLM model name (default: gpt-4o)")
     run_parser.add_argument("--output-dir", default=None,
-                            help="Directory for screenshots and artifacts (default: /tmp/agentprobe-output)")
+                            help="Directory for screenshots, demo.gif, result.json (default: /tmp/agentprobe-output)")
     run_parser.add_argument("--extension", default=None,
                             help="Path to unpacked browser extension (browser target only)")
     run_parser.add_argument("--max-steps", type=int, default=None,
