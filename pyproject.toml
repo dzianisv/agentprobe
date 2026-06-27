@@ -13,7 +13,9 @@ requires-python = ">=3.10"
 dependencies = ["openai>=1.0"]
 
 [project.optional-dependencies]
-browser = []
+# YAML test cases. The browser backend (browser/) is a Bun/TypeScript runner,
+# not a pip package — it runs from a repo checkout; see docs/quickstart.md.
+yaml = ["pyyaml>=6.0"]
 
 [project.scripts]
 agentprobe = "agentprobe.cli:main"

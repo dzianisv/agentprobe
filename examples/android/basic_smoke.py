@@ -1,5 +1,5 @@
 """Example: basic Android app smoke test using agentprobe."""
-from agentprobe import TestCase, run_cua_step
+from agentprobe import TestCase, run_case
 
 case = TestCase(
     name="basic_smoke",
@@ -10,11 +10,8 @@ case = TestCase(
 )
 
 if __name__ == "__main__":
-    result = run_cua_step(
-        goal=case.instruction,
-        max_steps=case.maxSteps,
-        step_label=case.name,
-        output_dir="/tmp/agentprobe-output",
-    )
-    print(f"Result: {result['status']}")
-    assert result["status"] == "success", f"Test failed: {result}"
+    # run_case drives the device, judges the final screenshot against
+    # successCriteria, assembles demo.gif, and writes result.json.
+    result = run_case(case, output_dir="/tmp/agentprobe-output")
+    print(f"Verdict: {result['verdict']} -- {result.get('reason', '')}")
+    assert result["verdict"] == "pass", f"Test failed: {result.get('reason')}"

@@ -68,5 +68,5 @@ case = TestCase(
 - `maxSteps` too low: multi-step flows need 30–40 steps.
 - Instruction too vague: add button names, expected text.
 - Missing `successCriteria`: always add it.
-- Android: ensure `OPENAI_API_KEY` or `AZURE_DEV_AI_API_KEY` is set.
+- Android: set one provider's credentials — `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY` (+ `AZURE_OPENAI_ENDPOINT`), `AZURE_DEV_AI_API_KEY` (+ `AZURE_DEV_AI_BASE_URL`), `GEMINI_API_KEY`, or `XAI_API_KEY`.
 - Browser: ensure `AZURE_CUA_API_KEY` + `AZURE_CUA_BASE_URL` are set.

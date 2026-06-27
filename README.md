@@ -2,7 +2,7 @@
 
 Test Android apps and browser extensions with a computer-use agent.
 
-An agent looks at screenshots, decides what to tap or type, and runs until the goal is met or the step budget is exhausted. The run produces a GIF you can inspect to see exactly where it succeeded or got confused.
+An agent looks at screenshots, decides what to tap or type, and runs until the goal is met or the step budget is exhausted. When the run ends, a second vision call judges the final screenshot against the case's success criteria — so a `pass` means the result was actually confirmed on screen, not just claimed by the agent. The run produces a GIF you can inspect to see exactly where it succeeded or got confused.
 
 ## What it is / what it isn't
 
@@ -13,10 +13,12 @@ An agent looks at screenshots, decides what to tap or type, and runs until the g
 
 ```bash
 pip install agentprobe          # Python Android runner
-# Browser runner needs bun: https://bun.sh
 ```
 
-Or from source:
+The browser backend is a Bun/TypeScript runner that lives in `browser/` and runs from
+a repo checkout — it is not shipped inside the pip package. For `--target browser`,
+clone the repo and install [bun](https://bun.sh):
+
 ```bash
 git clone https://github.com/dzianisv/agentprobe
 cd agentprobe
@@ -58,7 +60,7 @@ open /tmp/agentprobe-output/demo.gif
 ## Example test case
 
 ```python
-from agentprobe import TestCase, run_cua_step
+from agentprobe import TestCase, run_case
 
 case = TestCase(
     name="basic_smoke",
@@ -68,25 +70,23 @@ case = TestCase(
     maxSteps=20,
 )
 
-result = run_cua_step(
-    goal=case.instruction,
-    max_steps=case.maxSteps,
-    step_label=case.name,
-    output_dir="/tmp/agentprobe-output",
-)
-print(result)
-# {'status': 'success', 'steps': 7, 'last_screenshot': '...'}
+result = run_case(case, output_dir="/tmp/agentprobe-output")
+print(result["verdict"], "--", result["reason"])
+# pass -- YES. The main screen shows a dashboard with a blue "Start" action button.
 ```
+
+`run_case` drives the device, judges the final screenshot against `successCriteria`
+(or `verification.prompt` if set), assembles `demo.gif`, and writes `result.json`.
 
 ## Output shape
 
 ```
 /tmp/agentprobe-output/
-  step-01-screenshot.png
-  step-02-tap.png
+  step-001_basic_smoke_01.png   # one screenshot per CUA step
+  step-002_basic_smoke_02.png
   ...
-  step-07-done.png
-  demo.gif
+  demo.gif                      # assembled from all step screenshots
+  result.json                   # {"verdict": "pass", "reason": "...", "steps": 7}
 ```
 
 ## Architecture

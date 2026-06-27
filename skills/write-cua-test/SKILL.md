@@ -48,14 +48,16 @@ open /tmp/agentprobe-output/demo.gif   # macOS
 xdg-open /tmp/agentprobe-output/demo.gif  # Linux
 ```
 
-## Reading the GIF output
-Screenshots named `step-NN-*.png` show what the agent saw and did at each step.
+## Reading the output
+Screenshots named `step-NNN_*.png` show what the agent saw and did at each step.
 `demo.gif` is assembled from all steps — scan it to see where the agent got confused.
-A `verification.json` (browser) or final assertion (Android) shows the pass/fail verdict.
+The pass/fail verdict is in `result.json` (Android: `{"verdict", "reason", "steps"}`)
+or `verification.json` (browser). The CLI also prints `RESULT: pass` / `RESULT: fail`
+and exits non-zero on fail.
 
 ## Common pitfalls
 - `maxSteps` too low: raise to 30–40 for multi-step flows.
 - Instruction too vague: add button names, expected text.
-- Missing `successCriteria`: add it — the verifier uses it.
-- Android: ensure `OPENAI_API_KEY` or `AZURE_DEV_AI_API_KEY` is set before running.
+- Missing `successCriteria`: add it — the verifier judges the final screenshot against it.
+- Android: set one provider — `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY` (+ `AZURE_OPENAI_ENDPOINT`), `AZURE_DEV_AI_API_KEY` (+ `AZURE_DEV_AI_BASE_URL`), `GEMINI_API_KEY`, or `XAI_API_KEY`.
 - Browser: ensure `AZURE_CUA_API_KEY` + `AZURE_CUA_BASE_URL` are set.

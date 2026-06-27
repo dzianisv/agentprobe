@@ -1,4 +1,9 @@
-"""Deterministic API polling helpers. No agentprobe imports; uses urllib.request only."""
+"""App-specific deterministic API checks for the OpenCode Mobile example.
+
+These are NOT generic agentprobe primitives — they hardcode the OpenCode server
+REST shape (/session, port 4096). They live here in examples/ as a pattern for
+pairing a CUA run with a deterministic server-side assertion. Copy and adapt the
+endpoint/paths for your own app's API. Uses urllib.request only — no deps."""
 import json
 import time
 import urllib.request

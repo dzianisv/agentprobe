@@ -1,5 +1,5 @@
 """Example: Android network drop resilience test using agentprobe."""
-from agentprobe import TestCase, run_cua_step
+from agentprobe import TestCase, run_case
 from agentprobe.android import simulate_network_drop, restore_network
 
 case = TestCase(
@@ -27,11 +27,6 @@ if __name__ == "__main__":
     t = threading.Thread(target=drop_and_restore, daemon=True)
     t.start()
 
-    result = run_cua_step(
-        goal=case.instruction,
-        max_steps=case.maxSteps,
-        step_label=case.name,
-        output_dir="/tmp/agentprobe-output",
-    )
+    result = run_case(case, output_dir="/tmp/agentprobe-output")
     t.join()
-    print(f"Result: {result['status']}")
+    print(f"Verdict: {result['verdict']} -- {result.get('reason', '')}")
