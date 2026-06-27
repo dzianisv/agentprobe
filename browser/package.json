@@ -1,0 +1,19 @@
+{
+  "name": "agentprobe-browser",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "test": "CUA_EXTENSION_ID=ajfjlohdpfgngdjfafhhcnpmijbbdgln bun tests/cua/runner.ts --extension-path ${CUA_EXTENSION_PATH:-dist/prod-unpacked} --test-case tests/cua/cases/google-oauth.ts --output-dir tests/cua/output/default --channel cdn",
+    "test:cdn": "CUA_EXTENSION_ID=ajfjlohdpfgngdjfafhhcnpmijbbdgln bun tests/cua/runner.ts --extension-path ${CUA_EXTENSION_PATH:-dist/prod-unpacked} --test-case tests/cua/cases/google-oauth.ts --output-dir tests/cua/output/google-oauth-cdn --channel cdn",
+    "test:cws": "CUA_EXTENSION_ID=djodpgokbmobeclicaicnnidccoinado bun tests/cua/runner.ts --extension-path ${CUA_EXTENSION_PATH:-dist/prod-webstore-unpacked} --test-case tests/cua/cases/google-oauth.ts --output-dir tests/cua/output/google-oauth-cws --channel cws"
+  },
+  "dependencies": {
+    "openai": "latest",
+    "sharp": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "@types/node": "latest"
+  }
+}
