@@ -6,9 +6,12 @@ from pathlib import Path
 
 
 def start_screen_recording(scenario_name: str):
-    """Start ADB screen recording. Returns (thread, stop_event, remote_path)."""
+    """Start ADB screen recording. Returns (thread, remote_path).
+
+    Stop it with stop_screen_recording(thread, remote_path, local_path), which
+    signals the on-device recorder via `pkill -2 screenrecord` and pulls the MP4.
+    """
     remote_path = f"/sdcard/cua_{scenario_name}.mp4"
-    stop_event = threading.Event()
 
     def _record():
         try:
@@ -22,7 +25,7 @@ def start_screen_recording(scenario_name: str):
     thread = threading.Thread(target=_record, daemon=True)
     thread.start()
     time.sleep(1.0)
-    return thread, stop_event, remote_path
+    return thread, remote_path
 
 
 def stop_screen_recording(thread, remote_path: str, local_path: str) -> bool:

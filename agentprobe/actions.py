@@ -62,11 +62,10 @@ def execute_action(action: dict, speed_multiplier: float = 1.0):
         try:
             subprocess.run(["adb", "push", tmp_path, "/sdcard/_cua_type.txt"],
                            capture_output=True, timeout=10)
-            subprocess.run(
-                ["adb", "shell", "input text \"$(cat /sdcard/_cua_type.txt)\""],
-                capture_output=True, timeout=30, shell=False,
-            )
-            # Use shell=True for command substitution
+            # shell=True so the host shell performs the command substitution
+            # ($(cat ...)), which the device's `input text` then receives as a
+            # single already-expanded argument. This handles spaces and special
+            # chars without manual escaping.
             subprocess.run(
                 'adb shell \'input text "$(cat /sdcard/_cua_type.txt)"\'',
                 capture_output=True, timeout=30, shell=True,

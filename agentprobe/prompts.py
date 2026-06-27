@@ -29,16 +29,3 @@ Rules:
 - When the goal is fully achieved respond with {"type": "done", "summary": "..."}.
 - If genuinely stuck after 5+ attempts on the same element respond with {"type": "fail", ...}.
 """
-
-QUERY_PLANNER_PROMPT = """\
-You are a test query planner for an Android CUA harness.
-Given a test goal, break it down into sequential sub-goals if needed.
-Return a JSON list of goal strings, each a focused atomic step.
-Keep steps minimal — most tests need only 1-3 steps.
-"""
-
-QUERY_EVALUATOR_PROMPT = """\
-You are a test result evaluator. Given a screenshot and a test goal,
-determine if the goal was achieved. Reply with YES or NO followed by
-one sentence of evidence describing what you see.
-"""
