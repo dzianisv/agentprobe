@@ -11,25 +11,36 @@ browser tests run a TypeScript/Bun CUA loop over CDP and xdotool. Both share the
 ```
 agentprobe run --target android
   -> agentprobe/loop.py:run_case()
-      -> run_cua_step()                         # drive the device
+      -> run_cua_step(success_criteria, failure_criteria)  # drive the device
           -> screenshot via adb exec-out screencap
           -> LLM call (openai-compatible API)
+              system prompt: SYSTEM_PROMPT (actions + rules)
+              per-step user msg includes:
+                  "SUCCESS when: <successCriteria>"   (if set)
+                  "FAIL immediately if: <failureCriteria>"  (if set)
           -> parse JSON action
           -> agentprobe/actions.py:execute_action()
               -> adb shell input tap/type/swipe/...
           -> repeat until done/fail/max_steps
       -> agentprobe/judge.py:judge_result()     # verdict from final screenshot
           -> ask vision model the verification.prompt or successCriteria (YES/NO)
+          -> verifier failure → verdict=fail (never silent pass)
       -> agentprobe/recording.py:assemble_gif() # demo.gif from step-*.png
-      -> write result.json                      # verdict + reason + steps
+      -> write result.json                      # verdict + reason + steps + gif path
 ```
 
-`run_cua_step()` only drives the UI and returns the loop status (success / failure
-/ timeout). It does NOT decide pass/fail — that is `judge_result()`, which sends the
-FINAL screenshot to the vision model and asks the case's `verification.prompt` (or
-its `successCriteria` as a YES/NO question). This is the anti-hallucination guard:
-the agent can emit `done` on the wrong screen, but the verdict comes from an
-independent look at the result. A verifier API failure is a fail, never a silent pass.
+`run_cua_step()` drives the UI and returns the loop status (success / failure /
+timeout). Each step includes the `successCriteria` and `failureCriteria` in the user
+message so the agent knows when to emit `done` or `fail`. The verdict is decided by
+`judge_result()`, which sends the FINAL screenshot to the vision model and asks the
+case's `verification.prompt` (or its `successCriteria` as a YES/NO question). This is
+the anti-hallucination guard: the agent can emit `done` on the wrong screen, but the
+verdict comes from an independent look at the result. A verifier API failure is a
+fail, never a silent pass.
+
+`result.json` is always written by the Android runner (via `run_case`) and contains
+`{"verdict", "reason", "steps", "gif"}`. Browser tests write `verification.json`
+instead.
 
 ## Browser: TypeScript + Bun + CDP
 

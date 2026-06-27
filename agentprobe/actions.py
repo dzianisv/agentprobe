@@ -1,8 +1,6 @@
 """Action dispatch for agentprobe Android harness."""
 import subprocess
-import tempfile
 import time
-import os
 
 from .android import adb
 
@@ -53,26 +51,14 @@ def execute_action(action: dict, speed_multiplier: float = 1.0):
 
     elif act == "type":
         text = action.get("text", "")
-        # Write text to device file, then use shell command-substitution to
-        # avoid % and quote issues. Ensures special chars are passed correctly.
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-        tmp.write(text)
-        tmp_path = tmp.name
-        tmp.close()
-        try:
-            subprocess.run(["adb", "push", tmp_path, "/sdcard/_cua_type.txt"],
-                           capture_output=True, timeout=10)
-            # shell=True so the host shell performs the command substitution
-            # ($(cat ...)), which the device's `input text` then receives as a
-            # single already-expanded argument. This handles spaces and special
-            # chars without manual escaping.
-            subprocess.run(
-                'adb shell \'input text "$(cat /sdcard/_cua_type.txt)"\'',
-                capture_output=True, timeout=30, shell=True,
-            )
-            _sleep(0.3, speed_multiplier)
-        finally:
-            os.unlink(tmp_path)
+        # shell=True so the host shell handles the quoting; _adb_escape
+        # sanitises characters that confuse `adb shell input text`.
+        escaped = _adb_escape(text)
+        subprocess.run(
+            f"adb shell input text '{escaped}'",
+            capture_output=True, timeout=30, shell=True,
+        )
+        _sleep(0.3, speed_multiplier)
         return f"typed '{text}'"
 
     elif act == "key":

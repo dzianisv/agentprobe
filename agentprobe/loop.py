@@ -46,6 +46,8 @@ def run_cua_step(
     output_dir: str = "/tmp",
     speed_multiplier: float = 1.0,
     client=None,
+    success_criteria: str = "",
+    failure_criteria: str = "",
 ) -> dict:
     """Run the CUA loop for a single goal until done/fail/max_steps.
 
@@ -69,13 +71,20 @@ def run_cua_step(
         )
         last_screenshot = img_b64
 
+        criteria_lines = []
+        if success_criteria:
+            criteria_lines.append(f"SUCCESS when: {success_criteria}")
+        if failure_criteria:
+            criteria_lines.append(f"FAIL immediately if: {failure_criteria}")
+        criteria_block = ("\n" + "\n".join(criteria_lines)) if criteria_lines else ""
+
         content = [
             {
                 "type": "text",
                 "text": (
                     f"{label_prefix}Step {step}/{max_steps}. "
                     f"Screen: {screen_w}x{screen_h}px. "
-                    f"Goal: {goal}\n"
+                    f"Goal: {goal}{criteria_block}\n"
                     "What action should I take next?"
                 ),
             },
@@ -154,6 +163,8 @@ def run_case(
         output_dir=output_dir,
         speed_multiplier=speed_multiplier,
         client=client,
+        success_criteria=getattr(case, "successCriteria", ""),
+        failure_criteria=getattr(case, "failureCriteria", ""),
     )
 
     result = judge_result(case, loop_result, client, model)
