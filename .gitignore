@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+node_modules/
+dist/
+build/
+*.egg-info/
+.env
+.env.*
+/tmp/agentprobe-output/
+*.gif
+*.mp4
+step-*.png
+stage-*.png
