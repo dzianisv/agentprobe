@@ -1,15 +1,31 @@
-name: vibe-install-smoke
-# CWS_EXTENSION_ID from vibe/tests/cua/runner.ts: djodpgokbmobeclicaicnnidccoinado
-# CDN_EXTENSION_ID (dev/unpacked): ajfjlohdpfgngdjfafhhcnpmijbbdgln
+name: vibe-install-from-cws
+# Full install flow: navigate to CWS, click Add to Chrome, confirm dialog, verify installed.
+# Chrome starts clean (no --load-extension). scrot + xdotool can interact with CWS pages
+# because they are system-level X11 tools, not Chrome extensions.
+#
+# Extension IDs:
+#   CWS (published): djodpgokbmobeclicaicnnidccoinado
+#   CDN/dev unpacked: ajfjlohdpfgngdjfafhhcnpmijbbdgln
 url: https://chromewebstore.google.com/detail/vibe/djodpgokbmobeclicaicnnidccoinado
-goal: Navigate to the Vibe extension page on the Chrome Web Store and verify the extension listing loads correctly
+goal: >
+  Install the Vibe extension from the Chrome Web Store.
+  Steps:
+  1. The Chrome Web Store page for Vibe should already be open. Verify you see the Vibe listing.
+  2. Click the "Add to Chrome" button.
+  3. A confirmation dialog will appear asking to add the extension — click "Add extension".
+  4. Wait for the installation to complete. Chrome will show a confirmation toast or open a new tab.
+  5. Verify the Vibe extension is now installed: the toolbar should show a Vibe icon,
+     or a "Vibe was added to Chrome" notification is visible.
+  6. Report TEST_PASSED when installation is confirmed.
 successCriteria:
-  - The Chrome Web Store page for Vibe is loaded
-  - The extension name "Vibe" is visible on the page
-  - An "Add to Chrome" or "Remove from Chrome" button is present
+  - The Vibe extension is successfully installed from the Chrome Web Store
+  - A toolbar icon for Vibe is visible, OR a "added to Chrome" confirmation is shown
+  - No error during installation
 failureCriteria:
-  - Chrome Web Store page fails to load or shows an error
-  - Page is blank, shows 404, or "Item not available"
+  - "Add to Chrome" button is not found on the page
+  - Installation dialog was dismissed without confirming
+  - An error message appeared during installation
+  - Page shows "Item not available" or 404
 verification:
-  prompt: "Does this screenshot show the Chrome Web Store listing page for the Vibe extension, with the extension name visible and either an 'Add to Chrome' or 'Remove from Chrome' button present? Answer YES or NO, then one sentence of evidence."
-maxSteps: 10
+  prompt: "Does this screenshot show evidence that the Vibe extension was just installed from the Chrome Web Store? Look for: a Vibe toolbar icon, a 'Vibe was added to Chrome' notification, or the extension listing showing 'Remove from Chrome' (indicating it is now installed). Answer YES or NO, then one sentence of evidence."
+maxSteps: 20
