@@ -1,0 +1,78 @@
+name: CUA - Android App (opencode)
+
+on:
+  push:
+    paths:
+      - 'examples/android/**'
+      - 'agentprobe/**'
+      - '.github/workflows/cua-android-app.yml'
+  pull_request:
+    paths:
+      - 'examples/android/**'
+      - 'agentprobe/**'
+      - '.github/workflows/cua-android-app.yml'
+  workflow_dispatch:
+
+jobs:
+  cua-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install agentprobe
+        run: pip install -e .
+
+      - name: Download opencode APK from F-Droid repo
+        # Fetches the latest APK from the custom F-Droid repo index.
+        # The repo is single-app so we take the first package found.
+        run: |
+          python3 - <<'PYEOF'
+          import urllib.request, json, sys
+          repo = "https://dzianisv.github.io/opencode-mobile/fdroid/repo"
+          try:
+              with urllib.request.urlopen(f"{repo}/index-v1.json", timeout=30) as r:
+                  idx = json.load(r)
+          except Exception as e:
+              print(f"Failed to fetch F-Droid index: {e}", file=sys.stderr)
+              sys.exit(1)
+          packages = idx.get("packages", {})
+          if not packages:
+              print("No packages found in F-Droid index", file=sys.stderr)
+              sys.exit(1)
+          for pkg_id, versions in packages.items():
+              if versions:
+                  apk = versions[0]["apkName"]
+                  url = f"{repo}/{apk}"
+                  print(f"Downloading {pkg_id} from {url}")
+                  urllib.request.urlretrieve(url, "opencode.apk")
+                  print("Download complete")
+                  break
+          PYEOF
+
+      - name: Run opencode CUA smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            adb install -r opencode.apk
+            agentprobe run \
+              --target android \
+              --case examples/android/opencode-smoke.yaml \
+              --output-dir /tmp/cua-android-output
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-android-output
+          path: /tmp/cua-android-output/

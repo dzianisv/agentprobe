@@ -1,0 +1,32 @@
+name: opencode-smoke
+# Install: downloaded from F-Droid repo and `adb install`ed by the CI workflow before this test runs.
+# F-Droid repo: https://dzianisv.github.io/opencode-mobile/fdroid/repo/
+#
+# This test derives its scenario from examples/android/opencode_checks.py:
+# the same "create hello.py" task is used so the vision judge and the
+# optional REST-API check both verify the same agent action.
+goal: >
+  Test the opencode AI coding assistant app.
+  Steps:
+  1. Find and open the opencode app from the launcher (look for "OpenCode" or "opencode" icon).
+  2. Once the app is open, locate the new session / new chat button and tap it.
+  3. In the chat input, type exactly: "Write a hello world Python script and save it as hello.py"
+  4. Tap the send button to submit the message.
+  5. Wait for the AI to respond — this may take 30–90 seconds. Do not tap anything during generation.
+  6. Once the response appears (a code block or file-creation confirmation), report TEST_PASSED.
+successCriteria:
+  - The opencode app is open and the main screen or chat interface is visible
+  - A message was sent to the AI asking it to create hello.py
+  - The AI responded with Python code or a file-creation confirmation
+  - No crash dialogs, error toasts, or connection-refused messages are visible
+failureCriteria:
+  - App fails to launch or crashes on startup
+  - No AI response visible after 120 seconds
+  - Error dialog, network error, or "connection refused" message is shown
+  - App shows only a blank white or black screen with no UI elements
+verification:
+  prompt: >
+    Does this screenshot show the opencode mobile app with an AI response visible?
+    The response should contain Python code (a hello world script or similar) or a
+    file-creation confirmation message. Answer YES or NO, then one sentence of evidence.
+maxSteps: 40

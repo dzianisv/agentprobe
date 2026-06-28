@@ -40,8 +40,6 @@ jobs:
 
       - name: Run browser CUA test
         env:
-          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
-          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           DISPLAY: ":99"
         run: |

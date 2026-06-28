@@ -1,0 +1,29 @@
+name: vibebrowser-webapp-smoke
+url: https://vibebrowser.app
+goal: >
+  Navigate to vibebrowser.app and verify the product landing page loads correctly.
+  Steps:
+  1. The browser should open at https://vibebrowser.app.
+  2. Wait for the page to fully load — look for the VibeBrowser product name, logo, or hero section.
+  3. Scroll down slowly to verify there is actual product content: features, screenshots, or pricing.
+  4. Locate a primary call-to-action button such as "Download", "Get started", "Try for free",
+     "Add to Chrome", or "Install extension".
+  5. Confirm there are no error pages (404, 500, maintenance, "coming soon" placeholder).
+  6. Report TEST_PASSED once the landing page is confirmed as working with CTA visible.
+successCriteria:
+  - The vibebrowser.app page loads without errors
+  - VibeBrowser branding (name or logo) is visible
+  - At least one CTA button (download, get started, add to Chrome, or install) is visible
+  - Page has real product content — not a placeholder, 404, or maintenance page
+failureCriteria:
+  - Page fails to load or connection times out
+  - A 404, 500, or Cloudflare error page is displayed
+  - The page shows a maintenance or "coming soon" placeholder with no product content
+  - No product branding or CTA visible after 30 seconds
+verification:
+  prompt: >
+    Does this screenshot show the vibebrowser.app landing page loaded successfully,
+    with VibeBrowser branding visible and at least one call-to-action button
+    (such as "Download", "Add to Chrome", "Get started", or "Install")?
+    Answer YES or NO, then one sentence of evidence.
+maxSteps: 10

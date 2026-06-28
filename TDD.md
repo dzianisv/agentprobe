@@ -46,6 +46,7 @@ class TestCase:
     maxSteps: int = 30                  # hard cap on CUA loop iterations
     verification: Optional[Verification] = None  # explicit judge prompt
     url: str = ""                       # browser only — starting URL
+    systemPromptExtra: str = ""         # app-specific instructions appended to SYSTEM_PROMPT
 
 @dataclass
 class Verification:
@@ -97,7 +98,7 @@ while step < maxSteps:
 
 Note: `click`, `double_click`, `scroll`, and `drag` are not implemented in `actions.py`. The system prompt asks the model for `tap` (not `click`) and `swipe` (not `drag`).
 
-**System prompt** (`agentprobe/prompts.py`): instructs the model to emit one JSON action per turn and use `tap` for all taps, `swipe` for scrolling/dragging, `key` for hardware keys, and `done`/`fail` for terminal states. **Known gap:** the prompt currently contains messaging-app specific instructions (e.g., "pressing enter inserts a newline — it does NOT send the message") that are not applicable to general Android flows. This is tracked for cleanup in a future release.
+**System prompt** (`agentprobe/prompts.py`): instructs the model to emit one JSON action per turn and use `tap` for all taps, `swipe` for scrolling/dragging, `key` for hardware keys, and `done`/`fail` for terminal states. The system prompt is generic — instructs the model to emit one JSON action per turn, use `tap`/`swipe`/`key`/`done`/`fail`, and avoid app-specific assumptions.
 
 ---
 
@@ -191,9 +192,10 @@ Uses its own client setup (not Python's `make_client()`).
 
 | Env var | Purpose |
 |---|---|
-| `AZURE_CUA_API_KEY` | **Required.** API key for the OpenAI-compatible endpoint |
-| `AZURE_CUA_BASE_URL` | Base URL override (default: `https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1`) |
-| `CUA_MODEL` | Model name (default: `gpt-5.4-2026-03-05`) |
+| `AZURE_CUA_API_KEY` | Azure AI Foundry key — takes precedence over `OPENAI_API_KEY` when set. Default endpoint: `https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1`. |
+| `OPENAI_API_KEY` | OpenAI key — used when `AZURE_CUA_API_KEY` is not set. |
+| `AZURE_CUA_BASE_URL` | Override base URL when using `AZURE_CUA_API_KEY` (default: `https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1`). |
+| `CUA_MODEL` | Model name (default: `gpt-5.4-2026-03-05`). |
 | `CUA_TOOL_TYPE` | Tool type: `computer` (gpt-5.x), `computer_use_preview`, or `computer_use`. Auto-detected from model name if unset. |
 
 ---
@@ -306,6 +308,15 @@ examples/
   android-settings.yaml
   open-weather.yaml
   install-extension.yaml
+  android/
+    basic_smoke.py         Example Python test case
+    opencode_checks.py     Deterministic REST-API checks (pair with opencode-smoke.yaml)
+    opencode-smoke.yaml    opencode Android app CUA smoke test
+  vibebrowser/
+    vibe-install-smoke.yaml     Vibe extension CWS install test
+    vibe-sidepanel-smoke.yaml   Vibe side panel open/verify test (requires pre-loaded ext)
+    vibe-settings-provider.yaml Vibe settings provider test
+    vibebrowser-webapp.yaml     vibebrowser.app landing page smoke test
   screenshots/
     android/          Emulator run screenshots + demo.gif
     browser/          Browser run screenshots + demo.gif
@@ -334,3 +345,24 @@ README.md             Quickstart
 - Test result dashboard / reporting UI
 - Cloud device farms (BrowserStack, Firebase Test Lab)
 - Deterministic action replay (record + playback)
+
+---
+
+## Pilot Test Cases
+
+Three real-world products are tested via agentprobe in CI. Each maps to a workflow in `.github/workflows/`.
+
+| Workflow | Test case | Target | Install method |
+|---|---|---|---|
+| `cua-android-app.yml` | `examples/android/opencode-smoke.yaml` | Android | APK downloaded from F-Droid repo, `adb install` before test |
+| `cua-chrome-extension.yml` | `examples/vibebrowser/vibe-install-smoke.yaml` | Browser | CUA agent installs from CWS through Chrome UI; scrot+xdotool bypass CWS scripting restriction |
+| `cua-chrome-webapp.yml` | `examples/vibebrowser/vibebrowser-webapp.yaml` | Browser | No install; direct navigation to `https://vibebrowser.app`; also runs daily via cron |
+
+### Required CI secrets
+
+| Secret | Used by |
+|---|---|
+| `AZURE_CUA_API_KEY` | All three pilot workflows (Android + Browser) |
+| `AZURE_CUA_BASE_URL` | Optional — overrides Azure endpoint (default: `vibe-dev-ai.cognitiveservices.azure.com`) |
+
+`OPENAI_API_KEY` is a fallback for both backends; `AZURE_CUA_API_KEY` takes precedence when set.

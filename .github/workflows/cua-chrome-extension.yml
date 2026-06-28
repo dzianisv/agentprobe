@@ -1,0 +1,73 @@
+name: CUA - Chrome Extension (Vibe AI)
+
+# Tests installing the Vibe AI extension from the Chrome Web Store.
+# CWS extension ID: djodpgokbmobeclicaicnnidccoinado
+# scrot + xdotool are used for screenshots/input — they bypass Chrome's
+# restriction on scripting the Web Store page.
+
+on:
+  push:
+    paths:
+      - 'examples/vibebrowser/**'
+      - 'browser/**'
+      - '.github/workflows/cua-chrome-extension.yml'
+  pull_request:
+    paths:
+      - 'examples/vibebrowser/**'
+      - 'browser/**'
+      - '.github/workflows/cua-chrome-extension.yml'
+  workflow_dispatch:
+
+jobs:
+  cua-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install agentprobe
+        run: pip install -e .
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install browser runner deps
+        run: cd browser && bun install
+
+      - name: Install system deps (Xvfb, xdotool, scrot, Chrome)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool scrot ffmpeg
+          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+            | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] \
+            http://dl.google.com/linux/chrome/deb/ stable main" \
+            | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update && sudo apt-get install -y google-chrome-stable
+
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
+      - name: Run Vibe CWS install smoke test
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+          DISPLAY: ":99"
+        run: |
+          agentprobe run \
+            --target browser \
+            --case examples/vibebrowser/vibe-install-smoke.yaml \
+            --output-dir /tmp/cua-extension-output
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-extension-output
+          path: /tmp/cua-extension-output/
