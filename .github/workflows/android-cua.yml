@@ -4,17 +4,23 @@ on: [push, pull_request]
 jobs:
   cua:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install -e .
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
           script: agentprobe run --target android --case examples/android/basic_smoke.py --output-dir /tmp/cua-output
         env:
@@ -24,5 +30,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cua-output
+          name: cua-output-${{ github.run_number }}
           path: /tmp/cua-output/

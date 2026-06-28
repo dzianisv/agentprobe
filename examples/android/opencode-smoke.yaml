@@ -1,4 +1,5 @@
 name: opencode-smoke
+package: cc.agentlabs.opencode
 # Install: downloaded from F-Droid repo and `adb install`ed by the CI workflow before this test runs.
 # F-Droid repo: https://dzianisv.github.io/opencode-mobile/fdroid/repo/
 #

@@ -178,24 +178,32 @@ def run_case(
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     client, model = make_client(model)
 
-    rec_thread, rec_remote = start_screen_recording(case.name)
-    loop_result = run_cua_step(
-        goal=case.instruction,
-        max_steps=case.maxSteps,
-        model=model,
-        include_ui_xml=include_ui_xml,
-        verbose=verbose,
-        step_label=case.name,
-        output_dir=output_dir,
-        speed_multiplier=speed_multiplier,
-        client=client,
-        success_criteria="; ".join(case.successCriteria) if isinstance(case.successCriteria, list) else (case.successCriteria or ""),
-        failure_criteria="; ".join(case.failureCriteria) if isinstance(case.failureCriteria, list) else (case.failureCriteria or ""),
-        system_prompt_extra=case.systemPromptExtra,
-    )
+    from .android import ensure_app_foreground, maybe_dismiss_telemetry_consent
+    pkg = getattr(case, 'package', None)
+    if pkg:
+        ensure_app_foreground(pkg, verbose=verbose)
+        maybe_dismiss_telemetry_consent(pkg, verbose=verbose)
+        ensure_app_foreground(pkg, verbose=verbose)
 
-    rec_local = str(Path(output_dir) / f"{case.name}.mp4")
-    stop_screen_recording(rec_thread, rec_remote, rec_local)
+    rec_thread, rec_remote = start_screen_recording(case.name)
+    try:
+        loop_result = run_cua_step(
+            goal=case.instruction,
+            max_steps=case.maxSteps,
+            model=model,
+            include_ui_xml=include_ui_xml,
+            verbose=verbose,
+            step_label=case.name,
+            output_dir=output_dir,
+            speed_multiplier=speed_multiplier,
+            client=client,
+            success_criteria="; ".join(case.successCriteria) if isinstance(case.successCriteria, list) else (case.successCriteria or ""),
+            failure_criteria="; ".join(case.failureCriteria) if isinstance(case.failureCriteria, list) else (case.failureCriteria or ""),
+            system_prompt_extra=case.systemPromptExtra,
+        )
+    finally:
+        rec_local = str(Path(output_dir) / f"{case.name}.mp4")
+        stop_screen_recording(rec_thread, rec_remote, rec_local)
 
     result = judge_result(case, loop_result, client, model)
 

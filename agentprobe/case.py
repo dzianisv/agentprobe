@@ -17,3 +17,4 @@ class TestCase:
     verification: Optional[Verification] = None
     url: str = ""
     systemPromptExtra: str = ""  # App-specific prompt additions appended to SYSTEM_PROMPT
+    package: str = ""  # Android app package name for pre-flight (e.g. cc.agentlabs.opencode)
