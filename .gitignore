@@ -18,3 +18,8 @@ stage-*.png
 # Keep committed example screenshots
 !examples/screenshots/**/*.png
 !examples/screenshots/**/*.gif
+
+# Agent/IDE tooling
+.agents/
+.claude/
+.supervisor/

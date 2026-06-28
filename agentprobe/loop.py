@@ -1,6 +1,5 @@
 """CUA main loop for agentprobe Android harness."""
 import json
-import re
 import time
 from pathlib import Path
 
