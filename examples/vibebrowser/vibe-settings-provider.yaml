@@ -1,13 +1,27 @@
 name: vibe-settings-provider
-url: https://chrome-extension://ajfjlohdpfgngdjfafhhcnpmijbbdgln/settings.html
-goal: Open the Vibe extension settings page, verify the provider/model selector is visible and functional
+# PREREQUISITE: Vibe extension must be installed and Chrome must be launched
+# with the extension loaded. The runner uses CHROME_PATH + --load-extension or
+# a pre-built Chrome profile with the extension installed.
+# Use CUA_EXTENSION_ID env var to set the extension ID at runtime.
+# CDN ID (dev): ajfjlohdpfgngdjfafhhcnpmijbbdgln
+# CWS ID (prod): djodpgokbmobeclicaicnnidccoinado
+url: ""  # Set at runtime via --url chrome-extension://<CUA_EXTENSION_ID>/settings.html
+goal: >
+  Navigate to the Vibe extension settings page. Open the browser address bar,
+  type chrome-extension://ajfjlohdpfgngdjfafhhcnpmijbbdgln/settings.html and press Enter.
+  If that fails try chrome-extension://djodpgokbmobeclicaicnnidccoinado/settings.html.
+  Verify the settings page loads and a provider or model selector is visible.
 successCriteria:
-  - The settings page is loaded and visible
+  - The Vibe settings page is loaded and visible (shows Vibe branding or provider configuration)
   - A provider or model selector dropdown is present on the page
   - No error messages are displayed
 failureCriteria:
-  - Settings page fails to load
-  - Error dialog or blank page appears
+  - Settings page fails to load or shows a Chrome extension error
+  - Blank page or "ERR_FILE_NOT_FOUND" appears
 verification:
   prompt: "Does this screenshot show the Vibe extension settings page with a provider or model selector UI element visible? Answer YES or NO, then one sentence of evidence."
-maxSteps: 10
+maxSteps: 12
+systemPromptExtra: >
+  This test requires the Vibe Chrome extension to be installed. If navigating to
+  the chrome-extension:// URL fails, try the alternate extension ID. If both fail,
+  report TEST_FAILED with reason "Extension not installed".

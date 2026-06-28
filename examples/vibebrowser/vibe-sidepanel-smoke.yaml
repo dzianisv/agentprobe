@@ -1,14 +1,26 @@
 name: vibe-sidepanel-smoke
+# PREREQUISITE: Vibe extension must be installed and Chrome profile must have it loaded.
 url: https://github.com/dzianisv/agentprobe
-goal: Open the Vibe extension side panel in Chrome and verify it loads without errors. Click the Vibe extension icon in the Chrome toolbar to open the side panel.
+goal: >
+  Open the Vibe extension side panel in Chrome and verify it loads without errors.
+  Steps:
+  1. Look for the Vibe extension icon (puzzle piece or Vibe logo) in the Chrome toolbar top-right.
+  2. If the Vibe icon is not visible in the toolbar, click the puzzle-piece Extensions icon first,
+     then click "Vibe" to pin it, then click the Vibe icon.
+  3. After clicking the Vibe icon, the side panel should open on the right side of the window.
+  4. Verify the side panel shows Vibe-branded UI: a chat interface, sign-in prompt, or Vibe logo.
 successCriteria:
   - The Vibe side panel is open and visible on the right side of the browser window
-  - The side panel shows the Vibe UI (chat interface or sign-in prompt)
+  - The side panel shows Vibe-branded UI (Vibe logo, chat input, or Vibe sign-in prompt)
   - No error messages or blank panel
 failureCriteria:
-  - Side panel fails to open
-  - Extension icon not found in toolbar
+  - Side panel fails to open after clicking the Vibe icon
+  - Extension is not installed (icon not found in toolbar or Extensions menu)
   - Error message visible in the panel
 verification:
-  prompt: "Does this screenshot show the Vibe extension side panel open on the right side of the Chrome browser window? The side panel is a narrow column (300-450px wide) on the right edge showing the Vibe UI. Answer YES or NO, then one sentence of evidence."
+  prompt: "Does this screenshot show the Vibe extension side panel open on the right side of the Chrome browser window, displaying Vibe-branded UI — specifically the Vibe logo, a chat input field, or a Vibe sign-in form (NOT a generic GitHub sidebar or browser UI)? Answer YES or NO, then one sentence of evidence."
 maxSteps: 15
+systemPromptExtra: >
+  The Vibe side panel is a 300-450px wide column anchored to the right edge of the Chrome
+  window. It is NOT a browser tab. If you only see a standard GitHub page without a right-side
+  panel, the side panel has not been opened yet.
