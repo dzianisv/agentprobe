@@ -15,8 +15,8 @@ case = TestCase(
     ),
     successCriteria=[
         "Calculator app is open with a numeric keypad visible",
-        "Digit buttons 0-9 are visible on screen",
-        "An arithmetic operator button is visible",
+        "Multiple digit buttons are visible on screen",
+        "At least one arithmetic operator button (+, −, ×, or ÷) is visible",
     ],
     failureCriteria=[
         "App crashes or shows an error dialog",
