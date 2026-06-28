@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 
 @dataclass
@@ -11,7 +11,8 @@ class Verification:
 class TestCase:
     name: str
     instruction: str
-    successCriteria: str = ""
-    failureCriteria: str = ""
+    successCriteria: List[str] = field(default_factory=list)
+    failureCriteria: List[str] = field(default_factory=list)
     maxSteps: int = 30
     verification: Optional[Verification] = None
+    url: str = ""

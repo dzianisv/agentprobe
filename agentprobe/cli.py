@@ -50,19 +50,23 @@ def _run_browser(args):
         print("ERROR: bun not found in PATH. Install from https://bun.sh", file=sys.stderr)
         sys.exit(2)
 
-    if not args.extension:
-        print("ERROR: --extension is required for the browser target "
-              "(path to the unpacked extension).", file=sys.stderr)
-        sys.exit(2)
-
-    cmd = ["bun", str(runner), "--extension-path", args.extension, "--test-case", args.case]
+    cmd = ["bun", str(runner), "--test-case", args.case]
     if args.output_dir:
         cmd += ["--output-dir", args.output_dir]
     if args.max_steps:
         cmd += ["--max-steps", str(args.max_steps)]
+    if args.url:
+        cmd += ["--url", args.url]
 
     result = subprocess.run(cmd)
     sys.exit(result.returncode)
+
+
+def _coerce_criteria(value):
+    """Normalize successCriteria / failureCriteria to a single joined string."""
+    if isinstance(value, list):
+        return "; ".join(str(v) for v in value if str(v).strip())
+    return value or ""
 
 
 def _load_case(case_path, max_steps_override):
@@ -74,13 +78,20 @@ def _load_case(case_path, max_steps_override):
         v = data.get("verification")
         if isinstance(v, dict) and v.get("prompt"):
             verification = Verification(prompt=v["prompt"])
+        raw_success = data.get("successCriteria", data.get("criteria", []))
+        raw_failure = data.get("failureCriteria", [])
+        if isinstance(raw_success, str):
+            raw_success = [raw_success] if raw_success.strip() else []
+        if isinstance(raw_failure, str):
+            raw_failure = [raw_failure] if raw_failure.strip() else []
         return TestCase(
             name=data.get("name", "test"),
             instruction=data.get("instruction", data.get("goal", "")),
-            successCriteria=data.get("successCriteria", ""),
-            failureCriteria=data.get("failureCriteria", ""),
+            successCriteria=raw_success,
+            failureCriteria=raw_failure,
             maxSteps=max_steps_override or data.get("maxSteps", 30),
             verification=verification,
+            url=data.get("url", ""),
         )
 
     if case_path.endswith(".py"):
@@ -164,8 +175,8 @@ def main():
                             help="LLM model name (default: gpt-4o)")
     run_parser.add_argument("--output-dir", default=None,
                             help="Directory for screenshots, demo.gif, result.json (default: /tmp/agentprobe-output)")
-    run_parser.add_argument("--extension", default=None,
-                            help="Path to unpacked browser extension (browser target only)")
+    run_parser.add_argument("--url", default=None,
+                            help="Starting URL for browser (browser target only)")
     run_parser.add_argument("--max-steps", type=int, default=None,
                             help="Override maximum CUA steps")
     run_parser.add_argument("--include-xml", action="store_true",
