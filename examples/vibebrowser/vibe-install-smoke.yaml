@@ -22,10 +22,10 @@ successCriteria:
   - A toolbar icon for Vibe is visible, OR a "added to Chrome" confirmation is shown
   - No error during installation
 failureCriteria:
-  - "Add to Chrome" button is not found on the page
+  - Add to Chrome button is not found on the page
   - Installation dialog was dismissed without confirming
   - An error message appeared during installation
-  - Page shows "Item not available" or 404
+  - Page shows Item not available or 404
 verification:
   prompt: "Does this screenshot show evidence that the Vibe extension was just installed from the Chrome Web Store? Look for: a Vibe toolbar icon, a 'Vibe was added to Chrome' notification, or the extension listing showing 'Remove from Chrome' (indicating it is now installed). Answer YES or NO, then one sentence of evidence."
 maxSteps: 20
