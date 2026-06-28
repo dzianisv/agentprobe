@@ -1,12 +1,18 @@
-name: nws-weather
-url: https://forecast.weather.gov/MapClick.php?CityName=New+York&state=NY&site=OKX
-goal: Navigate to the National Weather Service forecast page for New York and confirm a temperature value is visible
+name: browser-smoke
+# wttr.in?format=3 returns a single plain-text line ("New York: ⛅️  +22°C")
+# that Chrome renders as monospace text — no JS, no anti-bot blocks, loads in <1s.
+url: https://wttr.in/New+York?format=3
+goal: >
+  Navigate to wttr.in and confirm a weather summary line for New York is visible.
+  The page should show a one-line summary like "New York: ⛅️  +22°C" or similar.
+  Report TEST_PASSED once any temperature value (°C or °F) is visible on screen.
+  Report TEST_FAILED if the page shows an error or no temperature after waiting.
 defaultWaitMs: 3000
-maxSteps: 10
+maxSteps: 8
 successCriteria:
-  - A temperature value (°F) is visible on screen
-  - A location heading or city name for New York is visible
+  - A temperature value (°C or °F) is visible on screen
+  - A city name or location is visible
 failureCriteria:
   - Page fails to load or shows a server error after waiting
 verification:
-  prompt: "Does this screenshot show a National Weather Service forecast page with at least one temperature value visible? Answer YES or NO, then one sentence of evidence."
+  prompt: "Does this screenshot show a weather summary with at least one temperature value (a number followed by °C or °F)? Answer YES or NO, then one sentence of evidence."

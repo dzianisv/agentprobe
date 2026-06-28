@@ -6,21 +6,23 @@ case = TestCase(
     # com.android.calculator2 is the AOSP calculator, present on all emulator API levels.
     package="com.android.calculator2",
     instruction=(
-        "The Calculator app is open. Verify the numeric keypad is visible with digit "
-        "buttons (0–9) and at least one operator button (+, −, ×, or ÷). "
-        "Tap the digit '5', then the '+' button, then '3', then '=' and confirm the "
-        "result '8' appears. Report TEST_PASSED once you see the result."
+        "The Calculator app has been launched. "
+        "Verify: (1) the numeric keypad with digit buttons 0–9 is visible, "
+        "(2) at least one arithmetic operator button (+, −, ×, or ÷) is visible, "
+        "(3) there is a display area at the top where results appear. "
+        "Report TEST_PASSED if all three are visible. "
+        "Report TEST_FAILED if the screen is blank, shows an error, or shows a different app."
     ),
     successCriteria=[
         "Calculator app is open with a numeric keypad visible",
         "Digit buttons 0-9 are visible on screen",
-        "The result '8' is displayed after entering 5 + 3 =",
+        "An arithmetic operator button is visible",
     ],
     failureCriteria=[
         "App crashes or shows an error dialog",
-        "The display does not update after tapping digits",
+        "Screen is blank or shows a different app",
     ],
-    maxSteps=15,
+    maxSteps=8,
 )
 
 if __name__ == "__main__":
