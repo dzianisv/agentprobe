@@ -18,7 +18,8 @@ jobs:
           disable-animations: true
           script: agentprobe run --target android --case examples/android/basic_smoke.py --output-dir /tmp/cua-output
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
