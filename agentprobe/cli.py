@@ -62,13 +62,6 @@ def _run_browser(args):
     sys.exit(result.returncode)
 
 
-def _coerce_criteria(value):
-    """Normalize successCriteria / failureCriteria to a single joined string."""
-    if isinstance(value, list):
-        return "; ".join(str(v) for v in value if str(v).strip())
-    return value or ""
-
-
 def _load_case(case_path, max_steps_override):
     """Load a TestCase from a .py, .json, or .yaml file. Returns a TestCase."""
     from .case import TestCase, Verification
@@ -92,6 +85,7 @@ def _load_case(case_path, max_steps_override):
             maxSteps=max_steps_override or data.get("maxSteps", 30),
             verification=verification,
             url=data.get("url", ""),
+            systemPromptExtra=data.get("systemPromptExtra", ""),
         )
 
     if case_path.endswith(".py"):

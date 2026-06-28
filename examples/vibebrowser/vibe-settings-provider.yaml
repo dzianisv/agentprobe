@@ -1,0 +1,13 @@
+name: vibe-settings-provider
+url: https://chrome-extension://ajfjlohdpfgngdjfafhhcnpmijbbdgln/settings.html
+goal: Open the Vibe extension settings page, verify the provider/model selector is visible and functional
+successCriteria:
+  - The settings page is loaded and visible
+  - A provider or model selector dropdown is present on the page
+  - No error messages are displayed
+failureCriteria:
+  - Settings page fails to load
+  - Error dialog or blank page appears
+verification:
+  prompt: "Does this screenshot show the Vibe extension settings page with a provider or model selector UI element visible? Answer YES or NO, then one sentence of evidence."
+maxSteps: 10

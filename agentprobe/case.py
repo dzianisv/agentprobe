@@ -16,3 +16,4 @@ class TestCase:
     maxSteps: int = 30
     verification: Optional[Verification] = None
     url: str = ""
+    systemPromptExtra: str = ""  # App-specific prompt additions appended to SYSTEM_PROMPT

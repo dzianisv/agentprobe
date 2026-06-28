@@ -40,22 +40,25 @@ agentprobe run \
 open /tmp/agentprobe-output/demo.gif
 ```
 
-## Quickstart: Browser extension
+## Quickstart: Browser
 
-Requires: `bun` in PATH, a built extension directory, Azure CUA credentials.
+Requires: `bun` in PATH, Azure CUA credentials or OpenAI API key.
 
 ```bash
-export AZURE_CUA_API_KEY=...
-export AZURE_CUA_BASE_URL=https://...
+export OPENAI_API_KEY=sk-...
+# OR for Azure:
+# export AZURE_CUA_API_KEY=...
+# export AZURE_CUA_BASE_URL=https://...
 
 agentprobe run \
   --target browser \
-  --case browser/cases/google-oauth.ts \
-  --extension /path/to/ext/dist/prod-unpacked \
+  --case examples/open-weather.yaml \
   --output-dir /tmp/agentprobe-output
 
 open /tmp/agentprobe-output/demo.gif
 ```
+
+To test a Chrome extension: pass the Chrome Web Store URL via `--url` and the agent installs it through the browser UI. There is no `--extension` / `--load-extension` flag.
 
 ## Example test case
 

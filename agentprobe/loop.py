@@ -12,6 +12,25 @@ from .judge import judge_result
 from .recording import assemble_gif
 
 
+def _extract_first_json_object(text: str) -> dict | None:
+    """Extract the first valid JSON object from text using brace-depth tracking."""
+    depth = 0
+    start = None
+    for i, ch in enumerate(text):
+        if ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    start = None
+    return None
+
+
 def call_llm(client, model: str, system: str, history: list, max_retries: int = 5) -> str:
     """Call LLM via OpenAI-compatible API with exponential backoff on rate limit.
 
@@ -48,6 +67,7 @@ def run_cua_step(
     client=None,
     success_criteria: str = "",
     failure_criteria: str = "",
+    system_prompt_extra: str = "",
 ) -> dict:
     """Run the CUA loop for a single goal until done/fail/max_steps.
 
@@ -60,6 +80,7 @@ def run_cua_step(
     if client is None:
         client, model = make_client(model)
     history = []
+    system = SYSTEM_PROMPT + ("\n\n" + system_prompt_extra if system_prompt_extra else "")
     screen_w, screen_h = get_screen_size()
     label_prefix = f"[{step_label}] " if step_label else ""
     last_screenshot = ""
@@ -98,16 +119,21 @@ def run_cua_step(
 
         history.append({"role": "user", "content": content})
 
-        reply = call_llm(client, model, SYSTEM_PROMPT, history)
+        reply = call_llm(client, model, system, history)
         history.append({"role": "assistant", "content": reply})
 
-        # Parse action — tolerate markdown fences and multi-object responses
+        # Parse action — tolerate markdown fences; handle nested JSON objects
         try:
             clean = reply.strip()
             if clean.startswith("```"):
                 clean = clean.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            m = re.search(r'\{[^{}]*\}', clean)
-            action = json.loads(m.group(0)) if m else json.loads(clean)
+            # Try full string first; fall back to brace-depth scanner for nested objects
+            try:
+                action = json.loads(clean)
+            except json.JSONDecodeError:
+                action = _extract_first_json_object(clean)
+                if action is None:
+                    raise json.JSONDecodeError("no JSON object found", clean, 0)
         except (json.JSONDecodeError, AttributeError):
             if verbose:
                 print(f"  {label_prefix}[step {step}] Failed to parse: {reply[:120]}")
@@ -163,8 +189,9 @@ def run_case(
         output_dir=output_dir,
         speed_multiplier=speed_multiplier,
         client=client,
-        success_criteria=getattr(case, "successCriteria", ""),
-        failure_criteria=getattr(case, "failureCriteria", ""),
+        success_criteria="; ".join(case.successCriteria) if isinstance(case.successCriteria, list) else (case.successCriteria or ""),
+        failure_criteria="; ".join(case.failureCriteria) if isinstance(case.failureCriteria, list) else (case.failureCriteria or ""),
+        system_prompt_extra=case.systemPromptExtra,
     )
 
     result = judge_result(case, loop_result, client, model)

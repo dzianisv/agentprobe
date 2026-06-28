@@ -1,0 +1,58 @@
+name: Browser CUA
+
+on: [push, pull_request]
+
+jobs:
+  browser-cua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install agentprobe
+        run: pip install -e .
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install browser runner deps
+        run: cd browser && bun install
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool scrot ffmpeg
+          # Install Google Chrome
+          curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update && sudo apt-get install -y google-chrome-stable
+
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
+      - name: Run browser CUA test
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DISPLAY: ":99"
+        run: |
+          agentprobe run \
+            --target browser \
+            --case examples/open-weather.yaml \
+            --output-dir /tmp/browser-cua-output
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-cua-output
+          path: /tmp/browser-cua-output/

@@ -1,0 +1,14 @@
+name: vibe-install-smoke
+url: https://chromewebstore.google.com/detail/vibe/ajfjlohdpfgngdjfafhhcnpmijbbdgln
+goal: Navigate to the Vibe extension page on the Chrome Web Store and verify the extension listing loads correctly with the install button visible
+successCriteria:
+  - The Chrome Web Store page for Vibe is loaded
+  - The extension name "Vibe" is visible on the page
+  - An "Add to Chrome" or similar install button is present
+failureCriteria:
+  - Chrome Web Store page fails to load
+  - Extension listing shows an error
+  - Page is blank or shows 404
+verification:
+  prompt: "Does this screenshot show the Chrome Web Store listing page for the Vibe extension, with the extension name visible and an Add to Chrome button present? Answer YES or NO, then one sentence of evidence."
+maxSteps: 10

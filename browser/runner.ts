@@ -364,6 +364,9 @@ async function saveOptimizedScreenshot(targetFile: string): Promise<string> {
     .png({ compressionLevel: 9 })
     .toFile(targetFile);
 
+  // Remove the raw intermediate file to avoid polluting the output directory
+  try { Bun.spawnSync(["rm", "-f", rawFile]); } catch {}
+
   const data = await readFile(targetFile);
   return data.toString("base64");
 }
@@ -779,7 +782,8 @@ function startChrome(initialUrl = "about:blank"): Bun.Subprocess {
     initialUrl
   ];
 
-  return Bun.spawn(["google-chrome", ...chromeArgs], {
+  const chromeBin = process.env.CHROME_PATH ?? "google-chrome";
+  return Bun.spawn([chromeBin, ...chromeArgs], {
     stdout: "pipe",
     stderr: "pipe"
   });
@@ -790,9 +794,11 @@ function startChrome(initialUrl = "about:blank"): Bun.Subprocess {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const apiKey = process.env.AZURE_CUA_API_KEY;
-  if (!apiKey) {
-    throw new Error("AZURE_CUA_API_KEY is required");
+  // Support both Azure CUA and standard OpenAI. Azure takes precedence.
+  const azureKey = process.env.AZURE_CUA_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!azureKey && !openaiKey) {
+    throw new Error("Either AZURE_CUA_API_KEY or OPENAI_API_KEY is required");
   }
 
   const testCase = await loadTestCase(args.testCase);
@@ -801,16 +807,18 @@ async function main(): Promise<void> {
 
   await mkdir(args.outputDir, { recursive: true });
 
-  const clientOptions: ConstructorParameters<typeof OpenAI>[0] = { apiKey };
-  if (process.env.AZURE_CUA_BASE_URL) {
-    clientOptions.baseURL = process.env.AZURE_CUA_BASE_URL;
-  } else if (process.env.AZURE_CUA_API_KEY) {
-    // Default to the known Azure AI Foundry endpoint when using an Azure key without explicit base URL
-    clientOptions.baseURL = "https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1";
+  const clientOptions: ConstructorParameters<typeof OpenAI>[0] = {
+    apiKey: azureKey ?? openaiKey ?? ""
+  };
+  if (azureKey) {
+    clientOptions.baseURL = process.env.AZURE_CUA_BASE_URL ?? "https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1";
+  } else if (process.env.OPENAI_BASE_URL) {
+    clientOptions.baseURL = process.env.OPENAI_BASE_URL;
   }
   const client = new OpenAI(clientOptions);
 
-  const CUA_MODEL = process.env.CUA_MODEL ?? "gpt-5.4-2026-03-05";
+  // Default model: gpt-5.4 for Azure, gpt-4o for plain OpenAI
+  const CUA_MODEL = process.env.CUA_MODEL ?? (azureKey ? "gpt-5.4-2026-03-05" : "gpt-4o");
   const CUA_TOOL_TYPE = process.env.CUA_TOOL_TYPE ?? (CUA_MODEL.startsWith("gpt-5") ? "computer" : "computer_use_preview");
 
   let lastResponseId: string | undefined;
@@ -951,20 +959,32 @@ async function main(): Promise<void> {
     // defines a verification prompt, ask the model a focused yes/no question
     // against a fresh screenshot. NO → flip to FAIL. Catches the failure mode
     // where the agent sat on a wrong page and emitted a fabricated TEST_PASSED.
-    if (completion.success && testCase.verification) {
-      console.log("[verify] running post-loop verification...");
-      const verification = await verifyResult(
-        client,
-        CUA_MODEL,
-        testCase.verification,
-        args.outputDir
-      );
-      if (!verification.passed) {
-        completion = {
-          done: true,
-          success: false,
-          reason: `loop reported success but verifier rejected: ${verification.evidence || verification.error || verification.raw}`
-        };
+    if (completion.success) {
+      // Build verifier prompt: explicit verification.prompt takes priority;
+      // fall back to successCriteria so both targets behave consistently.
+      let verifierPrompt: string | undefined;
+      if (testCase.verification?.prompt) {
+        verifierPrompt = testCase.verification.prompt;
+      } else if (testCase.successCriteria.length > 0) {
+        const criteria = testCase.successCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
+        verifierPrompt = `The test success criteria are:\n${criteria}\n\nLooking at this screenshot, are ALL success criteria satisfied? Answer YES or NO on the first line, then one sentence of evidence.`;
+      }
+
+      if (verifierPrompt) {
+        console.log("[verify] running post-loop verification...");
+        const verification = await verifyResult(
+          client,
+          CUA_MODEL,
+          { prompt: verifierPrompt },
+          args.outputDir
+        );
+        if (!verification.passed) {
+          completion = {
+            done: true,
+            success: false,
+            reason: `loop reported success but verifier rejected: ${verification.evidence || verification.error || verification.raw}`
+          };
+        }
       }
     }
   } finally {

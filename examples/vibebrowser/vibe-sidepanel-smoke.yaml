@@ -1,0 +1,14 @@
+name: vibe-sidepanel-smoke
+url: https://github.com/dzianisv/agentprobe
+goal: Open the Vibe extension side panel in Chrome and verify it loads without errors. Click the Vibe extension icon in the Chrome toolbar to open the side panel.
+successCriteria:
+  - The Vibe side panel is open and visible on the right side of the browser window
+  - The side panel shows the Vibe UI (chat interface or sign-in prompt)
+  - No error messages or blank panel
+failureCriteria:
+  - Side panel fails to open
+  - Extension icon not found in toolbar
+  - Error message visible in the panel
+verification:
+  prompt: "Does this screenshot show the Vibe extension side panel open on the right side of the Chrome browser window? The side panel is a narrow column (300-450px wide) on the right edge showing the Vibe UI. Answer YES or NO, then one sentence of evidence."
+maxSteps: 15
