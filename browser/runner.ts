@@ -789,7 +789,25 @@ function startChrome(initialUrl = "about:blank"): Bun.Subprocess {
   });
 }
 
-
+// Poll Chrome's CDP endpoint until it responds (max 20s), then sleep 2s for the page to render.
+async function waitForChromeReady(timeoutMs = 20000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(500) });
+      if (res.ok) {
+        // CDP is up — give the initial page an extra 2s to paint
+        await Bun.sleep(2000);
+        return;
+      }
+    } catch {
+      // Chrome not ready yet
+    }
+    await Bun.sleep(500);
+  }
+  // Fallback: just wait the full timeout if CDP never responded
+  console.warn("[runner] Chrome CDP did not respond within timeout; proceeding anyway");
+}
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -832,8 +850,9 @@ async function main(): Promise<void> {
     chrome = startChrome(startUrl);
     recorder = startRecording(args.outputDir);
 
-    // Wait for Chrome to start
-    await Bun.sleep(3000);
+    // Wait for Chrome to be ready: poll the CDP endpoint until Chrome responds,
+    // then add extra time for the initial page to render.
+    await waitForChromeReady();
     await capturePhaseScreenshot(args.outputDir, "chrome-started");
 
     const successText = testCase.successCriteria.map((line, i) => `${i + 1}. ${line}`).join("\n");
