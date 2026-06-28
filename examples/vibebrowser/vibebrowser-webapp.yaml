@@ -26,4 +26,4 @@ verification:
     with VibeBrowser branding visible and at least one call-to-action button
     (such as "Download", "Add to Chrome", "Get started", or "Install")?
     Answer YES or NO, then one sentence of evidence.
-maxSteps: 10
+maxSteps: 20
