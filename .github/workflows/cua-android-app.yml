@@ -63,10 +63,7 @@ jobs:
           disable-animations: true
           script: |
             adb install -r opencode.apk
-            agentprobe run \
-              --target android \
-              --case examples/android/opencode-smoke.yaml \
-              --output-dir /tmp/cua-android-output
+            agentprobe run --target android --case examples/android/opencode-smoke.yaml --output-dir /tmp/cua-android-output
         env:
           AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
           AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
