@@ -1,0 +1,16 @@
+name: install-extension
+# Starting URL: the CWS listing for the extension under test.
+# The CUA agent will click "Add to Chrome", confirm the install dialog,
+# and verify the extension is active. Swap this URL for any CWS listing.
+url: https://chromewebstore.google.com/detail/vibe/ajfjlohdpfgngdjfafhhcnpmijbbdgln
+goal: Install the Vibe extension from the Chrome Web Store and verify the onboarding or auth prompt appears
+successCriteria:
+  - The extension is installed (toolbar icon visible or install confirmation shown)
+  - An onboarding screen, auth prompt, or sidepanel from the extension is visible
+failureCriteria:
+  - "Add to Chrome" button is not found on the page
+  - Installation fails with an error
+  - No extension UI visible after 120 seconds
+verification:
+  prompt: "Does this screenshot show that a Chrome extension was just installed — either a toolbar icon, an onboarding screen, or an auth prompt from the extension? Answer YES or NO, then one sentence of evidence."
+maxSteps: 30

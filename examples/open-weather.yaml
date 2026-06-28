@@ -1,0 +1,12 @@
+name: open-weather
+url: https://weather.com
+goal: Navigate to weather.com and find today's temperature for New York
+successCriteria:
+  - A temperature in degrees Fahrenheit is visible on screen
+  - The city name "New York" appears on screen
+failureCriteria:
+  - Page fails to load after 30 seconds
+  - An error message is visible
+verification:
+  prompt: "Does this screenshot show a weather forecast for New York with a temperature in °F? Answer YES or NO, then one sentence of evidence."
+maxSteps: 15

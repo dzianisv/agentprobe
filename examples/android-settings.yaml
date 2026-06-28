@@ -1,0 +1,11 @@
+name: android-settings-about
+goal: Open the Settings app and navigate to About Phone
+successCriteria:
+  - The Settings app is open
+  - The "About phone" section is visible
+failureCriteria:
+  - The app crashes or shows an error dialog
+  - Settings app does not open after 30 seconds
+verification:
+  prompt: "Does this screenshot show the About Phone section inside Android Settings? Answer YES or NO, then one sentence of evidence."
+maxSteps: 10
