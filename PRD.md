@@ -38,10 +38,14 @@ pip install agentprobe
 ```
 
 **Node / Bun (browser-only, zero-Python option):**
+
+The browser runner is a Bun/TypeScript script — it is not published to npm (`package.json` is `private: true`). Clone the repo and invoke it directly:
+
 ```bash
-npm install agentprobe
-# or
-bun add agentprobe
+git clone https://github.com/dzianisv/agentprobe
+cd agentprobe
+bun install
+bun browser/runner.ts --test-case examples/open-weather.yaml --output-dir /tmp/out
 ```
 
 ### Defining a test case
@@ -87,26 +91,29 @@ agentprobe run --target android --case examples/android-settings.yaml
 # Browser web app
 agentprobe run --target browser --case examples/open-weather.yaml
 
-# Browser — extension install from CWS (real user flow)
+# Browser — extension install from CWS (agent installs through browser UI)
 agentprobe run --target browser \
   --case examples/install-extension.yaml \
   --url https://chromewebstore.google.com/detail/vibe/ajfjlohdpfgngdjfafhhcnpmijbbdgln
-
-# Browser — local dev shortcut (skip CWS, load unpacked build directly)
-agentprobe run --target browser \
-  --case examples/install-extension.yaml \
-  --extension dist/extension/dev
 ```
+
+Extensions are installed through the Chrome Web Store UI by the CUA agent — there is no `--extension` / `--load-extension` flag. For dev builds, navigate the agent to `chrome://extensions` and have it load the unpacked directory through the UI.
+
+`python -m agentprobe` is equivalent to `agentprobe`.
 
 ### Output
 
 Every run writes to `--output-dir` (default: `/tmp/agentprobe-output/`):
 
-| File | Contents |
-|---|---|
-| `result.json` | `verdict`, `steps`, `reason`, verifier answer |
-| `step-001.png … step-NNN.png` | One screenshot per CUA step |
-| `demo.gif` | Animated GIF of the full run |
+| File | Target | Contents |
+|---|---|---|
+| `result.json` | Android | `verdict`, `steps`, `reason`, verifier answer |
+| `step-{NNN}_{label}.png` | Android | One screenshot per CUA step |
+| `step-{NN}-a{M}.png` | Browser | Screenshot after each computer-call action |
+| `runner-log.jsonl` | Browser | Per-step response JSON from the Responses API |
+| `recording.mp4` | Browser | Full-session screen capture via ffmpeg/x11grab |
+| `verification.json` | Browser | Post-loop verifier result (when `verification` defined) |
+| `demo.gif` | Both | Animated GIF of the full run |
 
 Exit code: `0` = pass, `1` = fail.
 
@@ -118,8 +125,8 @@ from agentprobe import TestCase, Verification, run_case
 case = TestCase(
     name="open-weather",
     instruction="Navigate to weather.com and find today's NYC temperature",
-    successCriteria="Temperature in °F and city name 'New York' visible",
-    failureCriteria="Page fails to load or error visible",
+    successCriteria=["Temperature in °F and city name 'New York' visible"],
+    failureCriteria=["Page fails to load or error visible"],
     verification=Verification(
         prompt="Does the screenshot show a NYC weather forecast with a temperature? YES or NO."
     ),
@@ -134,13 +141,19 @@ assert result["verdict"] == "pass", result["reason"]
 
 ```python
 # conftest.py or test_flows.py
-import pytest
-from agentprobe.pytest_plugin import cua_case  # auto-registered on install
+from agentprobe import TestCase, Verification
 
-def test_open_weather(cua_case):
-    result = cua_case("examples/open-weather.yaml")
+def test_open_weather(cua_case):  # fixture auto-registered on pip install
+    case = TestCase(
+        name="open-weather",
+        instruction="Navigate to weather.com and find today's NYC temperature",
+        successCriteria=["Temperature in °F and city name 'New York' visible"],
+    )
+    result = cua_case(case)
     assert result["verdict"] == "pass"
 ```
+
+The `cua_case` fixture takes a `TestCase` object (not a YAML file path). It calls `run_case()` and returns the verdict dict.
 
 ---
 
@@ -148,11 +161,15 @@ def test_open_weather(cua_case):
 
 The evaluation runs in two stages:
 
-**Stage 1 — CUA agent (actor):** Drives the device/browser step-by-step. Each step: takes a screenshot, sends it to a vision model with the goal + criteria, receives a JSON action (`click`, `type`, `key`, `scroll`, `wait`, `done`, `fail`). Repeats until `done`/`fail`/`maxSteps`.
+**Stage 1 — CUA agent (actor):** Drives the device/browser step-by-step. Each step: takes a screenshot, sends it to a vision model with the goal + criteria, receives a JSON action. Repeats until completion or `maxSteps`.
 
-**Stage 2 — Vision judge (evaluator):** After the loop ends, a *separate* LLM call sends the **final screenshot** + a YES/NO question to the vision model. The question is either the explicit `verification.prompt` or is derived from `successCriteria`. The judge's YES/NO is the authoritative verdict — it overrides the agent's self-reported status to prevent the agent from hallucinating success.
+**Stage 2 — Vision judge (evaluator):** After the loop ends, an independent LLM call sends the **final screenshot** + a YES/NO question to the vision model. The judge's YES/NO is the authoritative verdict — it overrides the agent's self-reported status to prevent hallucinated success.
 
-This two-stage design means the agent can never "claim done" and pass — an independent visual check always confirms.
+Per-backend nuance:
+- **Android** (`judge.py`): always runs the judge if a screenshot is available. Question priority: (1) `verification.prompt`, (2) question derived from `successCriteria`. Uses `chat.completions`.
+- **Browser** (`runner.ts → verifyResult()`): only runs the verifier when the loop reports `TEST_PASSED` AND the case defines `verification`. Uses only `verification.prompt` — `successCriteria` alone does not trigger a vision check. Uses the OpenAI Responses API.
+
+This two-stage design means the agent can never "claim done" and pass — an independent visual check always confirms (when configured).
 
 ---
 

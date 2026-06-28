@@ -39,20 +39,39 @@ Defined in `agentprobe/case.py`. Consumed by both backends.
 ```python
 @dataclass
 class TestCase:
-    name: str            # slug used in filenames
-    instruction: str     # plain-English goal for the CUA actor
-    successCriteria: str # what a passing end-state looks like
-    failureCriteria: str # conditions that mean fail immediately
-    maxSteps: int = 30   # hard cap on CUA loop iterations
+    name: str                           # slug used in filenames
+    instruction: str                    # plain-English goal for the CUA actor
+    successCriteria: List[str] = field(default_factory=list)
+    failureCriteria: List[str] = field(default_factory=list)
+    maxSteps: int = 30                  # hard cap on CUA loop iterations
     verification: Optional[Verification] = None  # explicit judge prompt
-    url: str = ""        # browser only — starting URL
+    url: str = ""                       # browser only — starting URL
 
 @dataclass
 class Verification:
     prompt: str          # YES/NO question asked to the vision judge
 ```
 
-Loaded from YAML/JSON/Python via `cli._load_case()`. YAML is canonical for human-authored cases.
+`successCriteria` and `failureCriteria` are both `List[str]`. YAML multi-value lists map directly; a single string in YAML is normalised to a one-element list by `_load_case()`.
+
+Loaded from YAML/JSON/Python via `cli._load_case()`. YAML is canonical for human-authored cases. `goal` is accepted as an alias for `instruction`.
+
+---
+
+## CLI Flags
+
+`agentprobe run` (`agentprobe/__main__.py` makes `python -m agentprobe` equivalent):
+
+| Flag | Default | Description |
+|---|---|---|
+| `--target` | required | `android` or `browser` |
+| `--case` | required | Path to `.py`, `.json`, `.yaml`, or `.yml` test case |
+| `--model` | `gpt-4o` | LLM model (Android only; overridden by xAI/Gemini env keys) |
+| `--output-dir` | `/tmp/agentprobe-output` | Directory for screenshots, GIF, logs |
+| `--url` | `None` | Starting URL (browser only) |
+| `--max-steps` | `None` | Override `maxSteps` from the test case |
+| `--include-xml` | `False` | Append UI hierarchy XML to each Android CUA step (Android only) |
+| `--speed-multiplier` | `1.0` | Timing multiplier: <1.0 = faster, >1.0 = slower (Android only) |
 
 ---
 
@@ -64,78 +83,118 @@ Loaded from YAML/JSON/Python via `cli._load_case()`. YAML is canonical for human
 while step < maxSteps:
     1. screencap via adb → base64 PNG
     2. build user message: goal + criteria + screenshot (vision)
-    3. call vision model → JSON action
+    3. call vision model via chat.completions → JSON action
     4. parse action: {type, x, y, text, key, ms, ...}
     5. execute action via adb input
     6. if action.type == "done" → return success
        if action.type == "fail" → return failure
     7. append to history (last 14 messages kept)
-    8. sleep action_delay
+    8. sleep action_delay * speed_multiplier
 → return timeout if maxSteps reached
 ```
 
-**Action types (Android):** `click`, `double_click`, `type`, `key`, `scroll`, `drag`, `wait`, `done`, `fail`.
+**Action types (Android):** `tap`, `type`, `key`, `swipe`, `clear_field`, `wait`, `screenshot`, `done`, `fail`.
 
-**System prompt** (`agentprobe/prompts.py`): instructs the model to emit one JSON action per turn, to use `done` only when the goal is visually confirmed, and to use `fail` on unrecoverable states.
+Note: `click`, `double_click`, `scroll`, and `drag` are not implemented in `actions.py`. The system prompt asks the model for `tap` (not `click`) and `swipe` (not `drag`).
+
+**System prompt** (`agentprobe/prompts.py`): instructs the model to emit one JSON action per turn and use `tap` for all taps, `swipe` for scrolling/dragging, `key` for hardware keys, and `done`/`fail` for terminal states. **Known gap:** the prompt currently contains messaging-app specific instructions (e.g., "pressing enter inserts a newline — it does NOT send the message") that are not applicable to general Android flows. This is tracked for cleanup in a future release.
 
 ---
 
 ## CUA Loop (Browser backend)
 
-`browser/runner.ts → runTestCase()`
+`browser/runner.ts → main()`
 
 Same logical loop as Android, different transport:
 
-- **Screenshot:** `scrot` captures the Xvfb display → PNG → base64.
-- **Actions:** `xdotool` for mouse click/move/type/key/scroll; native JS via CDP for `wait`.
-- **Chrome launch:** `chrome --remote-debugging-port=9222 --display=:99`
-  - With `--extension`: adds `--load-extension=<path>` (dev shortcut — loads unpacked build).
-  - With `--url`: navigates to the given URL as the starting point.
-  - Without either: starts at `about:blank`.
-- **System prompt:** "Interact with everything visible on screen" (full-page mode, not sidepanel-only).
+- **Screenshot:** `scrot` captures the Xvfb display → PNG → optimised via `sharp` → base64.
+- **Actions:** `xdotool` for mouse click/move/type/key/scroll; `Bun.spawnSync` for system-level calls.
+- **Chrome launch:** `google-chrome --no-sandbox --display=:99 --window-size=1920,1080 <startUrl>`
+  - `startUrl` = `--url` CLI arg, then `testCase.url`, then `about:blank`.
+  - No `--load-extension` or extension-related flags. Extensions must be installed through the Chrome Web Store UI by the CUA agent.
+- **LLM API:** uses OpenAI **Responses API** (`client.responses.create()`), not `chat.completions`. This is required for the `computer` / `computer_use_preview` tool type.
+- **Model:** `CUA_MODEL` env var (default: `gpt-5.4-2026-03-05`). `CUA_TOOL_TYPE` defaults to `computer` for gpt-5.x models, `computer_use_preview` otherwise.
+- **Completion signals:** the agent emits `TEST_PASSED` or `TEST_FAILED` as plain text in its response (not JSON). `determineCompletion()` scans `output_text` for these strings.
+- **Recording:** ffmpeg x11grab captures `:99` display to `recording.mp4` for the duration of the run.
+- **System prompt:** generic — instructs the agent to interact with whatever is visible on screen at 1920×1080.
 
-**Action types (browser):** `click`, `double_click`, `type`, `key`, `scroll`, `drag`, `move`, `wait`, `screenshot`, `done`, `fail`.
+**Action types (browser):** `click`, `double_click`, `type`, `key`, `scroll`, `drag`, `move`, `wait`. The agent signals completion via `TEST_PASSED` / `TEST_FAILED` text, not action objects.
 
 ---
 
 ## Verification / Judge
 
-`agentprobe/judge.py → judge_result()`
+The two backends use different judge implementations.
 
-Runs after the CUA loop regardless of its outcome.
+### Android — `agentprobe/judge.py → judge_result()`
+
+Runs after the CUA loop regardless of its outcome (success, failure, or timeout). Uses `chat.completions`.
 
 ```
 priority:
   1. case.verification.prompt   (explicit YES/NO question)
-  2. "Is this satisfied: {successCriteria}? YES or NO."
+  2. "Is this satisfied: {successCriteria}? YES or NO."  (derived)
 
-call: vision model(final_screenshot + question)
+call: vision model via chat.completions(final_screenshot + question)
   → parse first word of response for YES/NO
   → verdict = "pass" if YES else "fail"
 
-fallback (no question available):
+fallback (no question AND no screenshot available):
   → verdict = "pass" if loop_status == "success" else "fail"
 
-failure API call → always verdict = "fail" (never silently pass)
+verification API failure → always verdict = "fail"
 ```
 
-The judge is always a **separate LLM call** from the CUA actor — different prompt, different message history. This prevents the actor from contaminating the evaluation.
+### Browser — `browser/runner.ts → verifyResult()`
+
+Runs only when the loop reports `TEST_PASSED` AND `testCase.verification` is defined. Uses the OpenAI Responses API.
+
+```
+trigger: completion.success == true AND testCase.verification defined
+
+question source: verification.prompt ONLY
+  (successCriteria alone does NOT trigger a browser vision check)
+
+screenshot: fresh capture at verification time (not the last loop screenshot)
+
+call: client.responses.create(verification.prompt + fresh screenshot)
+  → parse response.output_text for YES/NO
+  → if NO: flip to fail ("loop reported success but verifier rejected")
+
+writes: verification.json to outputDir
+```
+
+**Key difference:** on Android, `successCriteria` provides a fallback judge question. On browser, if `verification` is not defined, the loop's `TEST_PASSED` / `TEST_FAILED` self-report is the final verdict — no independent vision check runs.
 
 ---
 
 ## Model Configuration
 
-Configured via environment variables (no hardcoded credentials).
+### Android backend (`agentprobe/client.py → make_client()`)
 
-| Var | Purpose |
+Checked in priority order. First matching key wins.
+
+| Env var(s) | Provider | Model |
+|---|---|---|
+| `AZURE_CUA_API_KEY` | Azure AI Foundry (OpenAI-compat) | `AZURE_CUA_MODEL` or `--model` / `CUA_MODEL`; default endpoint: `vibe-dev-ai.cognitiveservices.azure.com` |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI | `AZURE_OPENAI_MODEL` (default: `gpt-5.4`); also reads `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_API_VERSION` |
+| `AZURE_DEV_AI_API_KEY` | Azure Dev AI | `AZURE_DEV_AI_MODEL` (default: `gpt-4o-2024-11-20`); `AZURE_DEV_AI_BASE_URL` |
+| `OPENAI_API_KEY` | OpenAI | `--model` / `CUA_MODEL` (default: `gpt-4o`); optional `OPENAI_BASE_URL` |
+| `XAI_API_KEY` | xAI / Grok | **Fixed:** `grok-2-vision-1212` — ignores `--model` and `CUA_MODEL` |
+| `GEMINI_API_KEY` | Google Gemini | **Fixed:** `gemini-2.0-flash` — ignores `--model` and `CUA_MODEL` |
+
+If none of these are set, the process exits with an error listing all accepted keys.
+
+### Browser backend (`browser/runner.ts`)
+
+Uses its own client setup (not Python's `make_client()`).
+
+| Env var | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | Use OpenAI directly (gpt-4o by default) |
-| `AZURE_CUA_API_KEY` | Azure OpenAI API key |
-| `AZURE_CUA_BASE_URL` | Azure endpoint (e.g. `https://xxx.cognitiveservices.azure.com`) |
-| `AZURE_CUA_DEPLOYMENT` | Deployment name (e.g. `gpt-4o`, `gpt-5.4`) |
-| `CUA_MODEL` | Override model name (default: `gpt-4o`) |
-
-`agentprobe/client.py → make_client()` reads these and returns an `openai.OpenAI`-compatible client.
+| `AZURE_CUA_API_KEY` | **Required.** API key for the OpenAI-compatible endpoint |
+| `AZURE_CUA_BASE_URL` | Base URL override (default: `https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1`) |
+| `CUA_MODEL` | Model name (default: `gpt-5.4-2026-03-05`) |
+| `CUA_TOOL_TYPE` | Tool type: `computer` (gpt-5.x), `computer_use_preview`, or `computer_use`. Auto-detected from model name if unset. |
 
 ---
 
@@ -143,11 +202,26 @@ Configured via environment variables (no hardcoded credentials).
 
 Written to `--output-dir` (default: `/tmp/agentprobe-output/`).
 
+### Android backend
+
 | File | Produced by | Contents |
 |---|---|---|
-| `step-{name}_{N:02d}.png` | `android.screenshot_b64()` / `scrot` | Raw screenshot per step |
-| `demo.gif` | `recording.assemble_gif()` / ffmpeg | Animated playback of all steps |
-| `result.json` | `loop.run_case()` | `{verdict, steps, reason, verification}` |
+| `step-{NNN}_{label}.png` | `android.screenshot_b64()` | One screenshot per CUA step, e.g. `step-001_test-name_01.png` |
+| `demo.gif` | `recording.assemble_gif()` via ffmpeg | Animated playback of all steps |
+| `result.json` | `loop.run_case()` | `{verdict, steps, reason, verification}` (base64 blob excluded) |
+
+### Browser backend
+
+| File | Produced by | Contents |
+|---|---|---|
+| `step-00.png` | `saveOptimizedScreenshot()` | Initial screenshot before loop |
+| `step-{NN}-a{M}.png` | `saveOptimizedScreenshot()` | Screenshot after each computer-call action |
+| `chrome-started.png` | `capturePhaseScreenshot()` | Screenshot after Chrome launch |
+| `runner-log.jsonl` | runner main loop | Per-step Responses API output, action results |
+| `recording.mp4` | ffmpeg x11grab | Full-session screen capture |
+| `verification-screenshot.png` | `verifyResult()` | Fresh screenshot taken by the verifier |
+| `verification.json` | `verifyResult()` | `{passed, raw, evidence, error}` |
+| `demo.gif` | `assembleGif()` via ffmpeg | Assembled from `stage-NN-*.png` and `step-NN*.png` files |
 
 ---
 
@@ -156,29 +230,27 @@ Written to `--output-dir` (default: `/tmp/agentprobe-output/`).
 ### pip (Python — Android + browser)
 
 ```bash
-pip install agentprobe          # core
-pip install "agentprobe[yaml]"  # adds pyyaml for YAML test cases
+pip install agentprobe
 ```
 
-Requires Python ≥ 3.10. Android target additionally requires `adb` in PATH. Browser target requires `bun`, `xdotool`, `scrot`, and Chrome in PATH.
+`pyyaml` is included in core dependencies — no extra is needed for YAML test cases. The `[yaml]` extra exists for historical reasons and is a no-op.
 
-### npm / bun (browser-only, zero Python)
+Requires Python ≥ 3.10. Android target additionally requires `adb` in PATH. Browser target requires `bun`, `xdotool`, `scrot`, and `google-chrome` in PATH.
 
-The browser runner is a self-contained Bun script. Install as an npm package:
+`python -m agentprobe` is supported via `agentprobe/__main__.py`.
+
+### Bun (browser-only, zero Python)
+
+The browser runner is a Bun/TypeScript script in `browser/`. It is **not published to npm** (`package.json` is `"private": true`). Run it from a repo checkout:
 
 ```bash
-npm install agentprobe
-# or
-bun add agentprobe
+git clone https://github.com/dzianisv/agentprobe
+cd agentprobe
+bun install          # installs js-yaml, openai, sharp
+bun browser/runner.ts --test-case examples/open-weather.yaml --output-dir /tmp/out
 ```
 
-Run directly:
-
-```bash
-bunx agentprobe --case examples/open-weather.yaml --url https://weather.com
-```
-
-> Note: npm package is planned for v0.2. v0.1 ships the TS runner inside the pip wheel — invoke via `bun browser/runner.ts` from the repo root or set `AGENTPROBE_BROWSER_DIR`.
+Set `AGENTPROBE_BROWSER_DIR` to override the runner location when calling the Python CLI from outside the repo.
 
 ---
 
@@ -191,7 +263,22 @@ Registered automatically at install via `pyproject.toml`:
 agentprobe = "agentprobe.pytest_plugin"
 ```
 
-The plugin exposes a `cua_case` fixture that loads a YAML file and calls `run_case()`. Verdict failures raise `pytest.fail()` with the reason string.
+The plugin exposes a `cua_case` fixture. The fixture takes a `TestCase` object (not a YAML file path) and calls `run_case()`. Use it as:
+
+```python
+from agentprobe import TestCase
+
+def test_android_settings(cua_case):
+    case = TestCase(
+        name="settings-about",
+        instruction="Open Settings and navigate to About Phone",
+        successCriteria=["About phone section is visible"],
+    )
+    result = cua_case(case)
+    assert result["verdict"] == "pass", result["reason"]
+```
+
+Verdict failures raise `pytest.fail()` with the reason string (via the assertion — the fixture itself returns the dict).
 
 ---
 
@@ -199,21 +286,21 @@ The plugin exposes a `cua_case` fixture that loads a YAML file and calls `run_ca
 
 ```
 agentprobe/           Python package
+  __main__.py         Enables python -m agentprobe
   cli.py              Entry point, arg parsing, target dispatch
   loop.py             Android CUA loop (run_cua_step, run_case)
   actions.py          adb action executor
   android.py          screencap, ui_dump, get_screen_size
   case.py             TestCase / Verification dataclasses
-  client.py           OpenAI-compatible client factory
-  judge.py            Vision judge (post-loop verdict)
-  prompts.py          CUA actor system prompt
+  client.py           OpenAI-compatible client factory (Android)
+  judge.py            Vision judge (post-loop verdict, Android)
+  prompts.py          CUA actor system prompt (Android; messaging-app specific, known gap)
   recording.py        assemble_gif()
   pytest_plugin.py    pytest fixture
 
 browser/              Bun/TypeScript browser backend
-  runner.ts           CUA loop + Chrome launch + action executor
-  cases/              Example test cases (TypeScript modules)
-  package.json        Bun dependencies
+  runner.ts           CUA loop + Chrome launch + action executor + verifier
+  package.json        Bun dependencies (private: true — not published to npm)
 
 examples/
   android-settings.yaml
@@ -235,7 +322,7 @@ README.md             Quickstart
 **In scope:**
 - Android (adb, any device/emulator)
 - Browser web apps (`--url`)
-- Browser extension — via CWS install flow (`--url`) or local dev shortcut (`--extension`)
+- Browser extension — via CWS install flow (`--url`), agent installs through browser UI
 - YAML / JSON / Python test case formats
 - Vision judge (two-stage evaluation)
 - GIF output
