@@ -1,12 +1,12 @@
 name: open-weather
-url: https://weather.com
-goal: Navigate to weather.com and find today's temperature for New York
+url: https://wttr.in/New+York
+goal: Navigate to wttr.in and find today's temperature for New York
 successCriteria:
-  - A temperature in degrees Fahrenheit is visible on screen
-  - The city name "New York" appears on screen
+  - A temperature value is visible on screen
+  - The city name or weather location is visible
 failureCriteria:
   - Page fails to load after 30 seconds
   - An error message is visible
 verification:
-  prompt: "Does this screenshot show a weather forecast page on weather.com with at least one temperature value visible (any city, any unit)? Answer YES or NO, then one sentence of evidence."
-maxSteps: 15
+  prompt: "Does this screenshot show a weather page with at least one temperature value visible? Answer YES or NO, then one sentence of evidence."
+maxSteps: 10
