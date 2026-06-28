@@ -7,11 +7,12 @@ package: cc.agentlabs.opencode
 # the same "create hello.py" task is used so the vision judge and the
 # optional REST-API check both verify the same agent action.
 goal: >
-  Verify the opencode app launches and shows its main UI.
+  The opencode app has been launched. Verify it is showing its main UI.
   Steps:
-  1. Find and open the opencode app from the launcher (look for "OpenCode" or "opencode" icon).
-  2. Wait for the app to fully load — look for a chat input, session list, or main screen.
-  3. Confirm the app is showing its UI with no crash dialog or error screen visible.
+  1. Confirm the opencode app is in the foreground (look for a chat input, session list,
+     or main screen — not the system launcher or a crash dialog).
+  2. If a telemetry or consent dialog is visible, dismiss it.
+  3. Confirm the app UI has rendered — not a blank white or black screen.
   4. Report TEST_PASSED once the main UI is visible and stable.
 successCriteria:
   - The opencode app is open and the main screen or chat interface is visible

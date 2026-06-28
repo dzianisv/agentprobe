@@ -1,12 +1,12 @@
-name: open-weather
-url: https://wttr.in/New+York
-goal: Navigate to wttr.in and find today's temperature for New York
-successCriteria:
-  - A temperature value is visible on screen
-  - The city name or weather location is visible
-failureCriteria:
-  - Page fails to load after 30 seconds
-  - An error message is visible
-verification:
-  prompt: "Does this screenshot show a weather page with at least one temperature value visible? Answer YES or NO, then one sentence of evidence."
+name: nws-weather
+url: https://forecast.weather.gov/MapClick.php?CityName=New+York&state=NY&site=OKX
+goal: Navigate to the National Weather Service forecast page for New York and confirm a temperature value is visible
+defaultWaitMs: 3000
 maxSteps: 10
+successCriteria:
+  - A temperature value (°F) is visible on screen
+  - A location heading or city name for New York is visible
+failureCriteria:
+  - Page fails to load or shows a server error after waiting
+verification:
+  prompt: "Does this screenshot show a National Weather Service forecast page with at least one temperature value visible? Answer YES or NO, then one sentence of evidence."

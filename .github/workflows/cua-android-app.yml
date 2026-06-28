@@ -28,6 +28,9 @@ jobs:
       - name: Install agentprobe
         run: pip install -e .
 
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+
       - name: Download opencode APK from F-Droid repo
         # Fetches the latest APK from the custom F-Droid repo index.
         # The repo is single-app so we take the first package found.
@@ -81,3 +84,15 @@ jobs:
         with:
           name: cua-android-output-${{ github.run_number }}
           path: /tmp/cua-android-output/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-android-output-demo-${{ github.run_number }}
+          path: |
+            /tmp/cua-android-output/demo.gif
+            /tmp/cua-android-output/opencode-smoke.mp4
+          retention-days: 30
+          if-no-files-found: warn

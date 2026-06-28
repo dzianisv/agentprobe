@@ -1,0 +1,69 @@
+name: 'agentprobe Browser CUA'
+description: 'Run agentprobe CUA tests in headless Chrome. Secrets (AZURE_CUA_API_KEY, AZURE_CUA_BASE_URL) must be set in the calling job env.'
+
+inputs:
+  case:
+    description: 'Path to test case file (.yaml or .json)'
+    required: true
+  output-dir:
+    description: 'Directory for screenshots, demo.gif, result.json'
+    default: '/tmp/agentprobe-output'
+  url:
+    description: 'Starting URL (overrides the url field in the test case)'
+    default: ''
+  model:
+    description: 'Azure OpenAI model deployment name'
+    default: 'gpt-5.4'
+
+runs:
+  using: composite
+  steps:
+    - name: Install agentprobe
+      shell: bash
+      run: pip install agentprobe
+
+    - name: Checkout agentprobe browser runner
+      uses: actions/checkout@v4
+      with:
+        repository: dzianisv/agentprobe
+        path: _agentprobe
+        sparse-checkout: browser
+
+    - name: Install bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+
+    - name: Install browser runner deps
+      shell: bash
+      run: cd _agentprobe/browser && bun install
+
+    - name: Install system deps
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb xdotool scrot ffmpeg
+        google-chrome --version
+
+    - name: Start Xvfb
+      shell: bash
+      run: |
+        Xvfb :99 -screen 0 1920x1080x24 &
+        echo "DISPLAY=:99" >> $GITHUB_ENV
+
+    - name: Run CUA test in Chrome
+      shell: bash
+      env:
+        AGENTPROBE_BROWSER_DIR: ${{ github.action_path }}/../../_agentprobe/browser
+        CUA_MODEL: ${{ inputs.model }}
+        DISPLAY: ':99'
+      run: |
+        URL_ARG=""
+        if [ -n "${{ inputs.url }}" ]; then
+          URL_ARG="--url ${{ inputs.url }}"
+        fi
+        agentprobe run \
+          --target browser \
+          --case ${{ inputs.case }} \
+          --output-dir ${{ inputs.output-dir }} \
+          $URL_ARG

@@ -86,6 +86,7 @@ def _load_case(case_path, max_steps_override):
             verification=verification,
             url=data.get("url", ""),
             systemPromptExtra=data.get("systemPromptExtra", ""),
+            package=data.get("package", ""),
         )
 
     if case_path.endswith(".py"):

@@ -1,0 +1,52 @@
+name: 'agentprobe Android CUA'
+description: 'Run agentprobe CUA tests on an Android emulator. Secrets (AZURE_CUA_API_KEY, AZURE_CUA_BASE_URL) must be set in the calling job env.'
+
+inputs:
+  case:
+    description: 'Path to test case file (.yaml, .py, or .json)'
+    required: true
+  api-level:
+    description: 'Android emulator API level'
+    default: '33'
+  apk-path:
+    description: 'Optional path to an APK to install before the test'
+    default: ''
+  output-dir:
+    description: 'Directory for screenshots, demo.gif, result.json'
+    default: '/tmp/agentprobe-output'
+  model:
+    description: 'Azure OpenAI model deployment name'
+    default: 'gpt-5.4'
+
+runs:
+  using: composite
+  steps:
+    - name: Install agentprobe
+      shell: bash
+      run: pip install agentprobe
+
+    - name: Install ffmpeg
+      shell: bash
+      run: sudo apt-get install -y ffmpeg
+
+    - name: Enable KVM
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Run CUA test on Android emulator
+      uses: reactivecircus/android-emulator-runner@v2
+      env:
+        AZURE_CUA_MODEL: ${{ inputs.model }}
+      with:
+        api-level: ${{ inputs.api-level }}
+        arch: x86_64
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+        disable-animations: true
+        script: |
+          if [ -n "${{ inputs.apk-path }}" ]; then
+            adb install -r "${{ inputs.apk-path }}"
+          fi
+          agentprobe run --target android --case ${{ inputs.case }} --output-dir ${{ inputs.output-dir }}

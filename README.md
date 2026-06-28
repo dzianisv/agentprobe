@@ -23,14 +23,17 @@ clone the repo and install [bun](https://bun.sh):
 git clone https://github.com/dzianisv/agentprobe
 cd agentprobe
 pip install -e .
+cd browser && bun install
 ```
 
 ## Quickstart: Android
 
-Requires: `adb` in PATH, a connected device or emulator, an LLM API key.
+Requires: `adb` in PATH, a connected device or emulator, an Azure OpenAI key.
 
 ```bash
-export OPENAI_API_KEY=sk-...
+export AZURE_CUA_API_KEY=...
+export AZURE_CUA_BASE_URL=https://<your-resource>.openai.azure.com/
+export AZURE_CUA_MODEL=gpt-5.4
 
 agentprobe run \
   --target android \
@@ -42,13 +45,12 @@ open /tmp/agentprobe-output/demo.gif
 
 ## Quickstart: Browser
 
-Requires: `bun` in PATH, Azure CUA credentials or OpenAI API key.
+Requires: `bun` in PATH, `xdotool`, `scrot`, `ffmpeg`, and an Azure OpenAI key.
 
 ```bash
-export OPENAI_API_KEY=sk-...
-# OR for Azure:
-# export AZURE_CUA_API_KEY=...
-# export AZURE_CUA_BASE_URL=https://...
+export AZURE_CUA_API_KEY=...
+export AZURE_CUA_BASE_URL=https://<your-resource>.openai.azure.com/
+export AZURE_CUA_MODEL=gpt-5.4
 
 agentprobe run \
   --target browser \
@@ -58,7 +60,9 @@ agentprobe run \
 open /tmp/agentprobe-output/demo.gif
 ```
 
-To test a Chrome extension: pass the Chrome Web Store URL via `--url` and the agent installs it through the browser UI. There is no `--extension` / `--load-extension` flag.
+To test a Chrome extension: write a YAML case whose goal navigates Chrome to the
+Chrome Web Store and installs the extension. There is no `--extension` flag — the
+agent installs it through the browser UI, just like a user would.
 
 ## Example test case
 
@@ -67,30 +71,162 @@ from agentprobe import TestCase, run_case
 
 case = TestCase(
     name="basic_smoke",
-    instruction="Open the app, verify the main screen loads, tap the primary action button.",
-    successCriteria="Main screen is visible with a primary action button",
-    failureCriteria="App crashes or shows error dialog",
-    maxSteps=20,
+    package="com.android.calculator2",   # launches the app before CUA runs
+    instruction="Verify the Calculator keypad is visible, then compute 5 + 3 = and confirm the result is 8.",
+    successCriteria=["Calculator is open with a numeric keypad", "Result 8 is displayed"],
+    failureCriteria=["App crashes or shows error dialog"],
+    maxSteps=15,
 )
 
 result = run_case(case, output_dir="/tmp/agentprobe-output")
 print(result["verdict"], "--", result["reason"])
-# pass -- YES. The main screen shows a dashboard with a blue "Start" action button.
+# pass -- YES. The calculator shows 8 after tapping 5 + 3 =.
 ```
 
-`run_case` drives the device, judges the final screenshot against `successCriteria`
-(or `verification.prompt` if set), assembles `demo.gif`, and writes `result.json`.
+`run_case` brings the app to foreground, drives the device via the CUA loop, judges
+the final screenshot, assembles `demo.gif`, and writes `result.json`.
 
 ## Output shape
 
 ```
 /tmp/agentprobe-output/
-  step-001_basic_smoke_01.png   # one screenshot per CUA step
-  step-002_basic_smoke_02.png
+  basic_smoke_01.png        # one screenshot per CUA step
+  basic_smoke_02.png
   ...
-  demo.gif                      # assembled from all step screenshots
-  result.json                   # {"verdict": "pass", "reason": "...", "steps": 7}
+  basic_smoke.mp4           # screen recording (Android)
+  demo.gif                  # assembled from all step screenshots
+  result.json               # {"verdict": "pass", "reason": "...", "steps": 7}
 ```
+
+## CI Integration (GitHub Actions)
+
+### Android — one-liner via reusable action
+
+```yaml
+jobs:
+  cua-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dzianisv/agentprobe/.github/actions/agentprobe-android@main
+        with:
+          case: examples/android/basic_smoke.py
+          api-level: '33'
+          apk-path: path/to/app.apk   # optional: install APK before test
+          output-dir: /tmp/cua-output
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-output
+          path: /tmp/cua-output/
+```
+
+### Browser — one-liner via reusable action
+
+```yaml
+jobs:
+  cua-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dzianisv/agentprobe/.github/actions/agentprobe-browser@main
+        with:
+          case: examples/open-weather.yaml
+          output-dir: /tmp/cua-output
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-output
+          path: /tmp/cua-output/
+```
+
+### Manual setup (without the reusable action)
+
+<details>
+<summary>Android full workflow</summary>
+
+```yaml
+jobs:
+  cua-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install agentprobe
+      - run: sudo apt-get install -y ffmpeg
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: agentprobe run --target android --case examples/android/basic_smoke.py --output-dir /tmp/cua-output
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+          AZURE_CUA_MODEL: gpt-5.4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-output
+          path: /tmp/cua-output/
+```
+
+</details>
+
+<details>
+<summary>Browser full workflow</summary>
+
+```yaml
+jobs:
+  cua-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - uses: oven-sh/setup-bun@v2
+      - run: cd browser && bun install
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y xvfb xdotool scrot ffmpeg
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+      - name: Run CUA test
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+          CUA_MODEL: gpt-5.4
+          DISPLAY: ':99'
+        run: agentprobe run --target browser --case examples/open-weather.yaml --output-dir /tmp/cua-output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cua-output
+          path: /tmp/cua-output/
+```
+
+</details>
 
 ## Architecture
 
@@ -103,6 +239,6 @@ print(result["verdict"], "--", result["reason"])
 
 See [docs/writing-cases.md](docs/writing-cases.md) and [skills/write-cua-test/SKILL.md](skills/write-cua-test/SKILL.md).
 
-## CI integration
+## CI integration docs
 
 See [docs/ci.md](docs/ci.md) and [skills/agentprobe-ci/SKILL.md](skills/agentprobe-ci/SKILL.md).
