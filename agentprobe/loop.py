@@ -8,7 +8,7 @@ from .actions import execute_action
 from .client import make_client
 from .prompts import SYSTEM_PROMPT
 from .judge import judge_result
-from .recording import assemble_gif
+from .recording import assemble_gif, start_screen_recording, stop_screen_recording
 
 
 def _extract_first_json_object(text: str) -> dict | None:
@@ -178,6 +178,7 @@ def run_case(
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     client, model = make_client(model)
 
+    rec_thread, rec_remote = start_screen_recording(case.name)
     loop_result = run_cua_step(
         goal=case.instruction,
         max_steps=case.maxSteps,
@@ -192,6 +193,9 @@ def run_case(
         failure_criteria="; ".join(case.failureCriteria) if isinstance(case.failureCriteria, list) else (case.failureCriteria or ""),
         system_prompt_extra=case.systemPromptExtra,
     )
+
+    rec_local = str(Path(output_dir) / f"{case.name}.mp4")
+    stop_screen_recording(rec_thread, rec_remote, rec_local)
 
     result = judge_result(case, loop_result, client, model)
 
