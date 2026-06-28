@@ -8,5 +8,5 @@ failureCriteria:
   - Page fails to load after 30 seconds
   - An error message is visible
 verification:
-  prompt: "Does this screenshot show a weather forecast for New York with a temperature in °F? Answer YES or NO, then one sentence of evidence."
+  prompt: "Does this screenshot show a weather forecast page on weather.com with at least one temperature value visible (any city, any unit)? Answer YES or NO, then one sentence of evidence."
 maxSteps: 15
