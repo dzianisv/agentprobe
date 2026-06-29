@@ -57,10 +57,12 @@ def assemble_gif(output_dir: str):
         return None
 
     lines = []
-    for p in pngs:
+    for p in pngs[:-1]:  # All frames except the last
         lines.append(f"file '{p}'")
-        lines.append("duration 1.5")
+        lines.append("duration 0.8")  # Faster transitions
+    # Final frame: hold 3.0s so viewer sees the result clearly
     lines.append(f"file '{pngs[-1]}'")
+    lines.append("duration 3.0")
     list_path = Path(output_dir) / "frames.txt"
     list_path.write_text("\n".join(lines))
 
