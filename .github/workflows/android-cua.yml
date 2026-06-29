@@ -24,7 +24,7 @@ jobs:
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: agentprobe run --target android --case examples/android/basic_smoke.py --output-dir /tmp/cua-output
+          script: agentprobe run --target android --case examples/android/calculator_math.py --output-dir /tmp/cua-output
         env:
           AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
           AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
@@ -43,6 +43,6 @@ jobs:
           name: cua-output-demo-${{ github.run_number }}
           path: |
             /tmp/cua-output/demo.gif
-            /tmp/cua-output/basic_smoke.mp4
+            /tmp/cua-output/*.mp4
           retention-days: 30
           if-no-files-found: warn
