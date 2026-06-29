@@ -79,14 +79,18 @@ def run_cua_step(
     if client is None:
         client, model = make_client(model)
     history = []
+    captions = {}  # {filename: reasoning_text} for GIF overlays
     system = SYSTEM_PROMPT + ("\n\n" + system_prompt_extra if system_prompt_extra else "")
     screen_w, screen_h = get_screen_size()
     label_prefix = f"[{step_label}] " if step_label else ""
     last_screenshot = ""
 
     for step in range(1, max_steps + 1):
+        # Derive screenshot filename to track captions
+        step_name = f"{step_label}_{step:02d}" if step_label else f"{step:03d}"
+
         img_b64 = screenshot_b64(
-            label=f"{step_label}_{step:02d}" if step_label else f"{step:03d}",
+            label=step_name,
             output_dir=output_dir,
         )
         last_screenshot = img_b64
@@ -138,13 +142,37 @@ def run_cua_step(
                 print(f"  {label_prefix}[step {step}] Failed to parse: {reply[:120]}")
             continue
 
+        # Capture action for caption overlay
+        action_type = action.get('type', '?')
+        action_reason = action.get('reason', '')
+        if action_type and action_reason:
+            # Create readable caption: "ACTION: reason"
+            caption = f"{action_type.upper()}: {action_reason[:80]}"
+        elif action_type:
+            caption = f"{action_type.upper()}"
+        else:
+            caption = ""
+
+        # Map step to screenshot filename for caption
+        # Screenshots are saved as step-NNN_label.png or step-NNN.png
+        if step_label:
+            screenshot_base = f"step-{step:03d}_{step_label}"
+        else:
+            screenshot_base = f"step-{step:03d}"
+        if caption:
+            captions[f"{screenshot_base}.png"] = caption
+
         result = execute_action(action, speed_multiplier=speed_multiplier)
         if verbose:
             print(f"  {label_prefix}[step {step}] {action.get('type', '?')} -> {result}")
 
         if result == "DONE":
+            if captions:
+                (Path(output_dir) / "captions.json").write_text(json.dumps(captions, indent=2))
             return {"status": "success", "steps": step, "last_screenshot": last_screenshot}
         if result.startswith("FAIL"):
+            if captions:
+                (Path(output_dir) / "captions.json").write_text(json.dumps(captions, indent=2))
             return {"status": "failure", "steps": step, "last_screenshot": last_screenshot}
 
         # Trim history to keep context manageable
@@ -152,6 +180,10 @@ def run_cua_step(
             history = history[-14:]
 
         time.sleep(max(0.1, action_delay * speed_multiplier))
+
+    # Save captions for GIF overlay (timeout case)
+    if captions:
+        (Path(output_dir) / "captions.json").write_text(json.dumps(captions, indent=2))
 
     return {"status": "timeout", "steps": max_steps, "last_screenshot": last_screenshot}
 
