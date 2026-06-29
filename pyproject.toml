@@ -16,6 +16,8 @@ dependencies = ["openai>=1.0", "pyyaml>=6.0"]
 # YAML test cases. The browser backend (browser/) is a Bun/TypeScript runner,
 # not a pip package — it runs from a repo checkout; see docs/quickstart.md.
 yaml = ["pyyaml>=6.0"]
+# GIF overlays: add text captions showing agent reasoning to demo GIFs
+gif-captions = ["Pillow>=10.0"]
 
 [project.scripts]
 agentprobe = "agentprobe.cli:main"
