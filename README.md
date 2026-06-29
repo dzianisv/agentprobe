@@ -4,6 +4,14 @@ Test Android apps and browser extensions with a computer-use agent.
 
 An agent looks at screenshots, decides what to tap or type, and runs until the goal is met or the step budget is exhausted. When the run ends, a second vision call judges the final screenshot against the case's success criteria — so a `pass` means the result was actually confirmed on screen, not just claimed by the agent. The run produces a GIF you can inspect to see exactly where it succeeded or got confused.
 
+## Demo: Agents in Action
+
+**Android**: Agent solves arithmetic (computes 27 + 18 = 45)
+![Android Calculator Math](assets/android-calculator-math.gif)
+
+**Browser**: Agent navigates Chrome Web Store, verifies Vibe extension is published
+![Chrome Extension Verification](assets/extension-vibe-cws.gif)
+
 ## What it is / what it isn't
 
 - **Is**: a test harness that drives a real Android device (via adb) or real Chrome (via CDP) using an LLM agent
