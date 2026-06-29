@@ -94,6 +94,23 @@ print(result["verdict"], "--", result["reason"])
 `run_case` brings the app to foreground, drives the device via the CUA loop, judges
 the final screenshot, assembles `demo.gif`, and writes `result.json`.
 
+**Optional: Reasoning captions in GIFs**
+
+Install Pillow to add text overlays showing the agent's reasoning at each step:
+
+```bash
+pip install agentprobe[gif-captions]
+```
+
+With Pillow installed, `demo.gif` will include text annotations:
+- Frame 1: "TAP: Entering digit 2"
+- Frame 2: "TAP: Entering digit 7"
+- Frame 3: "TAP: Clicking plus operator"
+- ...
+- Final: "VERIFY: Checking if result 45 is visible"
+
+This makes demos much more educational — viewers see the agent's reasoning in action, not just screenshots.
+
 ## Output shape
 
 ```
