@@ -5,8 +5,11 @@
 // webapp scenario.
 //
 // Extracted from vibebrowser's tests/cua/runner.ts (`navigateChromeTo`) and
-// tests/cua/cws-visual-install.ts (`assertTextVisible`, generalized here as
-// `pollForDomText` + a throwing `assertTextVisible` wrapper).
+// tests/cua/cws-visual-install.ts (`assertTextVisible`, whose boolean-poll
+// body is extracted here as `pollForDomText`). `assertTextVisibleOrThrow` is
+// a NEW throwing wrapper — named distinctly from the source's boolean-
+// returning `assertTextVisible` so a migrating caller can't silently swap
+// a boolean check for an exception path (or vice versa).
 
 import { cdpSend } from "../../core/cdp";
 
@@ -58,8 +61,14 @@ export async function pollForDomText(browserWs: WebSocket, sessionId: string, te
   return false;
 }
 
-/** Same as `pollForDomText`, but throws (with `label` in the message) instead of returning false. */
-export async function assertTextVisible(
+/**
+ * Same as `pollForDomText`, but throws (with `label` in the message) instead
+ * of returning false. Deliberately NOT named `assertTextVisible`: the source
+ * script's function of that name returns a boolean (it is `pollForDomText`
+ * here), and reusing the name for throwing semantics would be an identity
+ * trap during migration.
+ */
+export async function assertTextVisibleOrThrow(
   browserWs: WebSocket,
   sessionId: string,
   text: string,
@@ -67,5 +76,5 @@ export async function assertTextVisible(
   label: string = text
 ): Promise<void> {
   const ok = await pollForDomText(browserWs, sessionId, text, timeoutMs);
-  if (!ok) throw new Error(`assertTextVisible: "${label}" never appeared in DOM within ${timeoutMs}ms`);
+  if (!ok) throw new Error(`assertTextVisibleOrThrow: "${label}" never appeared in DOM within ${timeoutMs}ms`);
 }

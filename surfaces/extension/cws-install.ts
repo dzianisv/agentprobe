@@ -27,6 +27,7 @@ import {
   waitForCdpReady,
   type Rect
 } from "../../core/cdp";
+import { BLANK_FRAME_DEFAULTS } from "../../core/blank-frame";
 import { waitForPaintSettle } from "../../core/paint";
 import { saveFullScreenshot } from "../../core/screenshot";
 import { type VisionClient, visionLocateAndClick } from "../../core/vision";
@@ -170,7 +171,7 @@ export async function installFromCws(opts: InstallFromCwsOptions): Promise<Insta
       outputDir: opts.outputDir,
       displayWidth,
       displayHeight,
-      blankGuard: { contentTop: 150, contentBottomMargin: 60, whiteFraction: 0.995, width: displayWidth, height: displayHeight }
+      blankGuard: { ...BLANK_FRAME_DEFAULTS, width: displayWidth, height: displayHeight }
     }
   );
   await writeFile(

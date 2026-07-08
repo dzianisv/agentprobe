@@ -42,7 +42,7 @@ export function xdotoolKeyRaw(key: string): void {
 }
 
 export function xdotoolType(text: string, opts: { delayMs?: number; clearModifiers?: boolean } = {}): void {
-  const { delayMs = 25, clearModifiers = true } = opts;
+  const { delayMs = 30, clearModifiers = true } = opts;
   const args = ["type"];
   if (clearModifiers) args.push("--clearmodifiers");
   args.push("--delay", String(delayMs), "--", text);

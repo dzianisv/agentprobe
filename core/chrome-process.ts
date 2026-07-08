@@ -2,11 +2,14 @@
 // branded Chrome with a CDP debugging port, and waiting for it to become
 // ready.
 //
-// Extracted from vibebrowser's tests/cua/cws-visual-install.ts (`startChrome`)
-// and tests/cua/runner.ts (`waitForChromeReady`). No `--enable-automation`,
-// no `--load-extension`/forcelist policy by default — this launches the
-// literal browser a human would use; callers add whatever extra flags their
-// scenario needs via `extraArgs`.
+// `startChrome` is extracted from vibebrowser's tests/cua/cws-visual-install.ts.
+// No `--enable-automation`, no `--load-extension`/forcelist policy by default —
+// this launches the literal browser a human would use; callers add whatever
+// extra flags their scenario needs via `extraArgs`.
+//
+// `waitForChromeReady` is NEW convenience code written for this extraction
+// (the source runner.ts used a bare `Bun.sleep(5000)` after launch) — it is
+// not battle-tested the way the rest of this repo's extracted code is.
 
 import path from "node:path";
 import { getBrowserWsUrl } from "./cdp";
@@ -71,11 +74,14 @@ export function startChrome(opts: StartChromeOptions): Bun.Subprocess {
 }
 
 /**
- * Poll Chrome's CDP endpoint until it responds (bounded by `timeoutMs`), then
- * sleep `postReadySettleMs` for the initial page to render. Forgiving on
- * timeout — logs a warning and returns rather than throwing, since a caller
- * may still be able to proceed (unlike `core/cdp.ts`'s `waitForCdpReady`,
- * which throws — used where the caller genuinely cannot proceed without CDP).
+ * NEW convenience code (not extracted — neither source file contained this;
+ * source runner.ts used a bare `Bun.sleep(5000)` after launch): poll Chrome's
+ * CDP endpoint until it responds (bounded by `timeoutMs`), then sleep
+ * `postReadySettleMs` for the initial page to render. Throws on timeout —
+ * an unreachable CDP endpoint after launch is a real startup failure, and
+ * proceeding silently would only defer the error to a more confusing place.
+ * Matches `core/cdp.ts`'s `waitForCdpReady` semantics; this variant exists
+ * for the post-ready settle sleep.
  */
 export async function waitForChromeReady(opts: { cdpPort: number; timeoutMs?: number; postReadySettleMs?: number }): Promise<void> {
   const { cdpPort, timeoutMs = 20_000, postReadySettleMs = 2_000 } = opts;
@@ -90,5 +96,5 @@ export async function waitForChromeReady(opts: { cdpPort: number; timeoutMs?: nu
     }
     await Bun.sleep(500);
   }
-  console.warn(`[chrome-process] Chrome CDP on port ${cdpPort} did not respond within ${timeoutMs}ms; proceeding anyway`);
+  throw new Error(`[chrome-process] Chrome CDP on port ${cdpPort} did not respond within ${timeoutMs}ms`);
 }
