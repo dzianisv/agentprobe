@@ -1,0 +1,21 @@
+{
+  "name": "agentprobe-cua",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Battle-tested CUA (computer-use-agent) core primitives and surfaces for browser/extension automation — CDP, vision-based click targeting, xdotool gestures, Chrome Web Store install, side panel assertion.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dzianisv/agentprobe"
+  },
+  "dependencies": {
+    "openai": "^6",
+    "sharp": "^0.35"
+  },
+  "devDependencies": {
+    "typescript": "^6",
+    "@types/node": "^26",
+    "bun-types": "^1"
+  }
+}
