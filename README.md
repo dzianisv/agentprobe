@@ -12,6 +12,14 @@ An agent looks at screenshots, decides what to tap or type, and runs until the g
 **Browser**: Agent navigates Chrome Web Store, verifies Vibe extension is published
 ![Chrome Extension Verification](assets/extension-vibe-cws.gif)
 
+## Showcase
+
+**Vibe AI Browser Co-Pilot, end to end with CUA (10x speed)**: the agent installs the extension from the real Chrome Web Store on CI (Xvfb + xdotool real clicks + vision-based click targeting), opens the side panel, signs in to Vibe Portal with real keystrokes, then executes an agentic task — "go to duckduckgo and ask when a first gpt model were released" — navigating the browser to duckduckgo.com and answering GPT-1, June 2018, with the reply visible in the side panel. Every step is asserted (CDP page targets, `chrome.storage`, DOM transcript) and screen-recorded.
+
+![Vibe CUA End-to-End Showcase](docs/showcase/vibe-cua-e2e.gif)
+
+Reference implementation: `tests/cua/cws-visual-install.ts` in [VibeTechnologies/VibeWebAgent PR #1504](https://github.com/VibeTechnologies/VibeWebAgent/pull/1504); extraction of these primitives into agentprobe core is tracked in [issue #1](https://github.com/dzianisv/agentprobe/issues/1).
+
 ## What it is / what it isn't
 
 - **Is**: a test harness that drives a real Android device (via adb) or real Chrome (via CDP) using an LLM agent
