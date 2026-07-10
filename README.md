@@ -20,6 +20,31 @@ An agent looks at screenshots, decides what to tap or type, and runs until the g
 
 Reference implementation: `tests/cua/cws-visual-install.ts` in [VibeTechnologies/VibeWebAgent PR #1504](https://github.com/VibeTechnologies/VibeWebAgent/pull/1504); extraction of these primitives into agentprobe core is tracked in [issue #1](https://github.com/dzianisv/agentprobe/issues/1).
 
+## Terminal + Browser dual-surface testing
+
+Some flows span two surfaces at once — a CLI in a terminal driving a browser-based auth step, for
+example. `examples/dual-surface/chrome-sync-login.ts` is the reference case: a real `xterm` runs the
+PUBLISHED `chrome-sync login` CLI on the left, a real Chrome window completes the resulting `/auth/cli`
+email/password form on the right, and both are screen-recorded together into one video.
+
+The pass/fail verdict is layered, not vibes-based:
+- a **deterministic oracle** — the CLI's own local callback server prints `✓ Authenticated as <name>` to
+  its stdout the moment the login round-trip actually completes, and the same string is rendered
+  server-side in the browser tab, so the test polls plain text output rather than guessing at DOM state;
+- an **independent vision judge** on the final screenshot, asking a strict YES/NO with a quoted evidence
+  string (default NO) — catches the case where the deterministic signal is present but the screen itself
+  looks wrong.
+
+<!-- DEMO_VIDEO: to be added by maintainer from CI artifact -->
+
+This runs on every push via the `cua-chrome-sync-login.yml` GitHub Actions workflow (green on `main`).
+Two supporting pieces make the recording trustworthy rather than just present:
+- **`core/validate-video.ts`** — proves the recording actually plays (duration, `+faststart`, clean
+  decode, non-blank sampled frames) before anyone calls the video "done". See below.
+- **[`skills/agentprobe-video-github-upload/SKILL.md`](skills/agentprobe-video-github-upload/SKILL.md)** —
+  how to get that recording onto a GitHub PR/issue/Release and validate the *served* bytes, not just the
+  local file.
+
 ## What it is / what it isn't
 
 - **Is**: a test harness that drives a real Android device (via adb) or real Chrome (via CDP) using an LLM agent
