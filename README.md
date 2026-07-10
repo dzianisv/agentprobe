@@ -35,7 +35,9 @@ The pass/fail verdict is layered, not vibes-based:
   string (default NO) — catches the case where the deterministic signal is present but the screen itself
   looks wrong.
 
-<!-- DEMO_VIDEO: to be added by maintainer from CI artifact -->
+![chrome-sync dual-surface login demo](docs/showcase/chrome-sync-login-dual-surface.gif)
+
+*Left: a real `xterm` running the published `chrome-sync login` CLI. Right: a real Chrome completing the `/auth/cli` form. Both recorded together in CI.* **▶ [Watch the full video (mp4, plays with sound-off)](https://github.com/dzianisv/agentprobe/releases/download/chrome-sync-login-demo/chrome-sync-login-dual-surface.mp4)** — this recording is validated by `core/validate-video.ts` (22.3s, `+faststart`, decodes clean, non-blank).
 
 This runs on every push via the `cua-chrome-sync-login.yml` GitHub Actions workflow (green on `main`).
 Two supporting pieces make the recording trustworthy rather than just present:
