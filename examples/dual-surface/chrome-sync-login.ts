@@ -238,7 +238,17 @@ async function main(): Promise<void> {
     const judgement = await visionJudge(
       vision,
       step02Path,
-      "Does the terminal window (left side) show the chrome-sync CLI reporting a SUCCESSFUL login (e.g. 'logged in', 'authenticated', a username/subdomain), AND is a separate Chrome browser window (right side) visible?",
+      // Single, unambiguous success fact keyed to the EXACT text the CLI
+      // renders — a compound "does it look successful" prompt made the judge
+      // flake NO on a genuinely-successful screenshot (it quoted "Authenticated
+      // as ..." then pedantically ruled it wasn't the word "authenticated").
+      // xterm renders the CLI's leading ✓ as garbled bytes (e.g. "âœ"); tell
+      // the judge to ignore that and key only on the words "Authenticated as".
+      "The LEFT window is a terminal and the RIGHT window is a Chrome browser. " +
+        "Answer YES if the terminal contains the text \"Authenticated as\" followed by a name " +
+        "(this is the chrome-sync CLI confirming a successful login) AND a Chrome browser window is visible on the right. " +
+        "Answer NO only if the words \"Authenticated as\" are not present anywhere in the terminal. " +
+        "Note: a checkmark before \"Authenticated as\" may render as garbled characters such as \"âœ\" — ignore that; only the words \"Authenticated as\" matter.",
       { outputDir, label: "chrome-sync-login" }
     );
     console.log(`[chrome-sync-login] vision judge verdict=${judgement.verdict} evidence=${judgement.evidence}`);
