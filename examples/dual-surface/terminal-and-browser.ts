@@ -45,17 +45,24 @@ async function main(): Promise<void> {
     model: process.env.CUA_MODEL ?? (azureKey ? "gpt-5.4" : "gpt-4o")
   });
 
-  const recorder = startRecording({ outputDir, displayWidth: DISPLAY_WIDTH, displayHeight: DISPLAY_HEIGHT });
-  const terminal = startTerminal({
-    cmd: "bash",
-    args: ["-c", "for i in 1 2 3 4 5; do echo agentprobe dual-surface demo line $i; sleep 1; done"],
-    outputDir,
-    // Left half of a 1920x1080 display, in xterm's character-cell geometry.
-    windowGeometry: "100x40+0+0"
-  });
-
+  // Declared before the try (and assigned inside it) so that if either
+  // startRecording or startTerminal itself throws before the try block is
+  // entered, the finally block below still runs and cleans up whichever of
+  // the two DID start — otherwise a throw here would orphan a running
+  // ffmpeg recorder (or xterm process) with nothing left to kill it.
+  let recorder: Bun.Subprocess | undefined;
+  let terminal: ReturnType<typeof startTerminal> | undefined;
   let chrome: Bun.Subprocess | undefined;
   try {
+    recorder = startRecording({ outputDir, displayWidth: DISPLAY_WIDTH, displayHeight: DISPLAY_HEIGHT });
+    terminal = startTerminal({
+      cmd: "bash",
+      args: ["-c", "for i in 1 2 3 4 5; do echo agentprobe dual-surface demo line $i; sleep 1; done"],
+      outputDir,
+      // Left half of a 1920x1080 display, in xterm's character-cell geometry.
+      windowGeometry: "100x40+0+0"
+    });
+
     const terminalWindowId = await waitForTerminalReady(terminal, { timeoutMs: 15_000 });
     console.log(`[dual-surface] terminal window ready: ${terminalWindowId}`);
 
@@ -91,10 +98,10 @@ async function main(): Promise<void> {
       throw new Error(`vision judge rejected the dual-surface screenshot: ${judgement.evidence}`);
     }
   } finally {
-    terminal.process.kill();
+    terminal?.process.kill();
     chrome?.kill();
-    recorder.kill();
-    await recorder.exited;
+    recorder?.kill();
+    await recorder?.exited;
     await assembleGif({ outputDir }).catch(() => {});
   }
 

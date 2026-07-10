@@ -125,12 +125,18 @@ async function main(): Promise<void> {
   });
 
   // Throwaway, unambiguously-test-data credential — self-seeded, never sent
-  // a real verification email (register-password is ungated), `.internal`
-  // TLD + `e2e-cli-login-` prefix mirrors this repo's existing
-  // canary-full-lifecycle.e2e.test.ts self-seed convention so nothing
-  // downstream mistakes this for a real signup.
+  // a real verification email (register-password is ungated). The email's
+  // LOCAL-PART must start with `e2e-oc-` — that is the load-bearing part:
+  // OpenClawBot's isTestEmail()/isTestUsername() (src/db/tenants.ts
+  // TEST_USERNAME_PREFIXES) classifies a signup as test data by matching a
+  // startsWith() prefix against the local-part only; the `.internal` domain
+  // is irrelevant to that check and does nothing on its own. A prior version
+  // of this string used `e2e-cli-login-`, which matches NO prefix in that
+  // list — every run of this example registered an unpurgeable real user row
+  // in the prod DB. `e2e-oc-` is a listed prefix, so `e2e-oc-cli-login-` is
+  // classifiable.
   const runId = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
-  const email = `e2e-cli-login-${runId}@e2e.openclaw.internal`;
+  const email = `e2e-oc-cli-login-${runId}@e2e.openclaw.internal`;
   const password = `e2e-cli-login-fixture-${crypto.randomBytes(6).toString("hex")}`; // not a real secret: gates only a throwaway synthetic identity
 
   console.log(`[chrome-sync-login] seeding throwaway account ${email} on ${API_BASE}`);
@@ -144,25 +150,38 @@ async function main(): Promise<void> {
   }
   console.log(`[chrome-sync-login] register-password: HTTP ${registerRes.status}`);
 
-  const recorder = startRecording({ outputDir, displayWidth: DISPLAY_WIDTH, displayHeight: DISPLAY_HEIGHT });
   const cliLogPath = path.join(outputDir, "chrome-sync-cli.log");
-  const terminal = startTerminal({
-    cmd: "bash",
-    args: [
-      "-c",
-      // `script` gives the CLI child a real pty (sync stdout, matching a
-      // human's terminal — avoids Node's process.exit()-vs-buffered-pipe
-      // truncation race) while `-f` flushes every write to cliLogPath so
-      // this script's poll loop observes output promptly.
-      `script -qefc "npx -y @vibetechnologies/chrome-sync@latest login --api-url ${API_BASE}" ${cliLogPath}`
-    ],
-    outputDir,
-    windowGeometry: "100x40+0+0" // left half of a 1920x1080 display
-  });
 
+  // Declared before the try (and assigned inside it) so that if either
+  // startRecording or startTerminal itself throws before the try block is
+  // entered, the finally block below still runs and cleans up whichever of
+  // the two DID start — otherwise a throw here would orphan a running
+  // ffmpeg recorder (or xterm process) with nothing left to kill it.
+  let recorder: Bun.Subprocess | undefined;
+  let terminal: ReturnType<typeof startTerminal> | undefined;
   let chrome: Bun.Subprocess | undefined;
   let browserWs: WebSocket | undefined;
   try {
+    recorder = startRecording({ outputDir, displayWidth: DISPLAY_WIDTH, displayHeight: DISPLAY_HEIGHT });
+    terminal = startTerminal({
+      cmd: "bash",
+      args: [
+        "-c",
+        // `script` gives the CLI child a real pty (sync stdout, matching a
+        // human's terminal — avoids Node's process.exit()-vs-buffered-pipe
+        // truncation race) while `-f` flushes every write to cliLogPath so
+        // this script's poll loop observes output promptly. `env BROWSER=true`
+        // neutralizes the CLI's own `xdg-open <authUrl>` auto-launch (it
+        // honors `$BROWSER` first) so only our single CDP-controlled Chrome
+        // window exists on the display — without it, a second, unmanaged,
+        // default-profile Chrome opens with no CDP port, can occlude the
+        // terminal window this script is watching, and is never killed.
+        `script -qefc "env BROWSER=true npx -y @vibetechnologies/chrome-sync@latest login --api-url ${API_BASE}" ${cliLogPath}`
+      ],
+      outputDir,
+      windowGeometry: "100x40+0+0" // left half of a 1920x1080 display
+    });
+
     const terminalWindowId = await waitForTerminalReady(terminal, { timeoutMs: 20_000 });
     console.log(`[chrome-sync-login] terminal window ready: ${terminalWindowId}`);
     await focusTerminal(terminalWindowId);
@@ -234,10 +253,10 @@ async function main(): Promise<void> {
     } catch {
       // best-effort
     }
-    terminal.process.kill();
+    terminal?.process.kill();
     chrome?.kill();
-    recorder.kill();
-    await recorder.exited;
+    recorder?.kill();
+    await recorder?.exited;
     await assembleGif({ outputDir }).catch(() => {});
   }
 }

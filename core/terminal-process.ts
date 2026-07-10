@@ -59,13 +59,15 @@ export function startTerminal(opts: StartTerminalOptions): TerminalHandle {
 }
 
 /**
- * Poll `xdotool search --class xterm` (bounded by `timeoutMs`) until a window
- * is mapped, then sleep `postReadySettleMs` for the initial prompt to render.
- * Throws on timeout — an xterm process that never produces a mapped window
- * is a real startup failure. Returns the window id so callers can target this
- * specific terminal (e.g. via `xdotool windowfocus <id>`) instead of a bare
- * `--class xterm` search, which would be ambiguous if more than one xterm is
- * open on the display.
+ * Poll `xdotool search --onlyvisible --pid <handle.pid>` (bounded by
+ * `timeoutMs`) until a window is mapped, then sleep `postReadySettleMs` for
+ * the initial prompt to render. Throws on timeout — an xterm process that
+ * never produces a mapped window is a real startup failure. Searching by pid
+ * (xterm sets `_NET_WM_PID` to its own process id, i.e. `handle.pid`) and
+ * `--onlyvisible` targets this specific terminal's mapped window, instead of
+ * a bare `--class xterm` search, which would return whichever xterm the
+ * window manager lists first — the wrong window whenever more than one xterm
+ * is open on the display, and possibly an unmapped one.
  */
 export async function waitForTerminalReady(
   handle: TerminalHandle,
@@ -74,7 +76,7 @@ export async function waitForTerminalReady(
   const { timeoutMs = 20_000, postReadySettleMs = 500 } = opts;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const windowIds = runCommand("xdotool", ["search", "--class", "xterm"], true);
+    const windowIds = runCommand("xdotool", ["search", "--onlyvisible", "--pid", String(handle.pid)], true);
     const firstId = windowIds.split("\n").find((line) => line.trim().length > 0);
     if (firstId) {
       handle.windowId = firstId.trim();
