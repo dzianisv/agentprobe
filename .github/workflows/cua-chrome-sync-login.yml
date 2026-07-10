@@ -1,0 +1,56 @@
+name: CUA Chrome-Sync Login (Terminal + Browser)
+
+on: [push, pull_request]
+
+jobs:
+  cua-chrome-sync-login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install agentprobe
+        run: pip install -e .
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install root deps
+        run: bun install
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool scrot ffmpeg xterm bsdutils
+          google-chrome --version
+          script --version
+
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
+      - name: Run chrome-sync login (terminal + browser) example
+        env:
+          AZURE_CUA_API_KEY: ${{ secrets.AZURE_CUA_API_KEY }}
+          AZURE_CUA_BASE_URL: ${{ secrets.AZURE_CUA_BASE_URL }}
+          CUA_MODEL: gpt-5.4
+          DISPLAY: ":99"
+        run: |
+          bun run examples/dual-surface/chrome-sync-login.ts /tmp/chrome-sync-login-output
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chrome-sync-login-output-${{ github.run_number }}
+          path: /tmp/chrome-sync-login-output/
+          retention-days: 14
+          if-no-files-found: warn

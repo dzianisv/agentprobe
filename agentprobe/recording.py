@@ -107,7 +107,7 @@ def overlay_text_on_frame(image_path: str, caption: str) -> str:
             # Draw semi-transparent background
             draw.rectangle(
                 [(bbox[0]-5, bbox[1]-5), (bbox[2]+5, bbox[3]+5)],
-                fill=(0, 0, 0, 200)
+                fill=bg_color
             )
             draw.text((20, y), line, fill=text_color, font=font)
             y += 40

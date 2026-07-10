@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     xdotool \
     scrot \
+    xterm \
     ffmpeg \
     unzip \
     curl \

@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y gnupg curl ca-certificates \
 RUN apt-get update && apt-get install -y \
     python3.11 python3-pip \
     adb \
-    xvfb xdotool scrot \
+    xvfb xdotool scrot xterm \
     google-chrome-stable \
     ffmpeg \
     curl unzip \

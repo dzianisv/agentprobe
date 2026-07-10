@@ -11,5 +11,5 @@
     "noEmit": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["core/**/*.ts", "surfaces/**/*.ts"]
+  "include": ["core/**/*.ts", "surfaces/**/*.ts", "examples/**/*.ts"]
 }
