@@ -4,7 +4,7 @@
 // Extracted from vibebrowser's tests/cua/runner.ts (`startRecording`,
 // `assembleGif`).
 
-import { readdir, writeFile } from "node:fs/promises";
+import { readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type StartRecordingOptions = {
@@ -30,6 +30,15 @@ export function startRecording(opts: StartRecordingOptions): Bun.Subprocess {
       "-preset", "fast",
       "-crf", "18",
       "-pix_fmt", "yuv420p",
+      // Put the `moov` atom in front so the file is playable as soon as it's
+      // written. This is a *hint* ffmpeg applies as it finalizes the stream
+      // normally (SIGTERM/`kill()` on the recorder) — it does not help if the
+      // process is killed hard enough to skip finalization entirely, which is
+      // why `finalizeRecording` below re-asserts it with a remux after the
+      // fact (agentprobe issue #6: a CI recording.mp4 shipped moov-after-mdat
+      // and showed 0:00 in the browser despite this flag already being a
+      // reasonable expectation to have).
+      "-movflags", "+faststart",
       path.join(outputDir, fileName)
     ],
     {
@@ -37,6 +46,47 @@ export function startRecording(opts: StartRecordingOptions): Bun.Subprocess {
       stderr: Bun.file(path.join(outputDir, "ffmpeg-recorder.log"))
     }
   );
+}
+
+export type FinalizeRecordingOptions = {
+  outputDir: string;
+  fileName?: string; // default "recording.mp4", must match startRecording's fileName
+};
+
+/**
+ * Guarantee `+faststart` (moov before mdat) on a just-finished recording,
+ * regardless of how cleanly `startRecording`'s ffmpeg process exited. Killing
+ * the recorder (the normal shutdown path — see `startRecording`'s call sites)
+ * can still leave `moov` after `mdat` in practice, and moov-after-mdat is the
+ * #1 cause of a video showing 0:00 in a browser/GitHub player — see
+ * `core/validate-video.ts`'s faststart check, which is what caught this on a
+ * real CI artifact (agentprobe issue #6).
+ *
+ * Remuxes with `-c copy` (no re-encode: fast, lossless) into a temp file,
+ * then swaps it in. No-op if the recording file doesn't exist (e.g. the
+ * caller never actually got a frame written) rather than throwing, since
+ * this always runs from a `finally` block alongside other best-effort
+ * cleanup.
+ */
+export async function finalizeRecording(opts: FinalizeRecordingOptions): Promise<void> {
+  const { outputDir, fileName = "recording.mp4" } = opts;
+  const filePath = path.join(outputDir, fileName);
+  if (!(await Bun.file(filePath).exists())) return;
+
+  // Keep the original extension (`.mp4`) on the temp name — ffmpeg's output
+  // muxer is selected from the destination filename's extension, so a
+  // dotfile-style temp name like `.recording.mp4.faststart-tmp` (no
+  // recognized extension) fails with "Unable to choose an output format".
+  const ext = path.extname(fileName);
+  const remuxedPath = path.join(outputDir, `${path.basename(fileName, ext)}.faststart-tmp${ext}`);
+  const proc = Bun.spawn(
+    ["ffmpeg", "-y", "-i", filePath, "-c", "copy", "-movflags", "+faststart", remuxedPath],
+    { stdout: "ignore", stderr: Bun.file(path.join(outputDir, "ffmpeg-faststart-remux.log")) }
+  );
+  const exitCode = await proc.exited;
+  if (exitCode !== 0 || !(await Bun.file(remuxedPath).exists())) return; // best-effort: leave original in place
+
+  await rename(remuxedPath, filePath);
 }
 
 export type AssembleGifOptions = {

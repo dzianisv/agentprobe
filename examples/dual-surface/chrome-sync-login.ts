@@ -52,7 +52,7 @@ import crypto from "node:crypto";
 import { attachAndEnable, cdpSend, findTargetByUrl, getBrowserWsUrl, openCdpWs, pollForElementReady } from "../../core/cdp";
 import { startChrome, waitForChromeReady } from "../../core/chrome-process";
 import { startTerminal, waitForTerminalReady } from "../../core/terminal-process";
-import { assembleGif, startRecording } from "../../core/recording";
+import { assembleGif, finalizeRecording, startRecording } from "../../core/recording";
 import { saveOptimizedScreenshot } from "../../core/screenshot";
 import { createVisionClient, visionJudge } from "../../core/vision";
 import { focusTerminal } from "../../surfaces/terminal/focus";
@@ -267,6 +267,9 @@ async function main(): Promise<void> {
     chrome?.kill();
     recorder?.kill();
     await recorder?.exited;
+    // Re-assert +faststart via remux — killing the recorder can still leave
+    // moov after mdat, which is why the video shows 0:00 in a viewer (issue #6).
+    await finalizeRecording({ outputDir }).catch(() => {});
     await assembleGif({ outputDir }).catch(() => {});
   }
 }
