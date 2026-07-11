@@ -60,6 +60,21 @@ function readDurationSeconds(filePath: string): number {
   return Number.isFinite(dur) ? dur : 0;
 }
 
+/** ffprobe container `format_name` (e.g. "mov,mp4,m4a,..." or "matroska,webm"), lowercased. */
+function readFormatName(filePath: string): string {
+  const proc = Bun.spawnSync(["ffprobe", "-v", "error", "-show_entries", "format=format_name", "-of", "csv=p=0", filePath]);
+  // ffprobe CSV quotes values containing commas (e.g. `"matroska,webm"`) — strip the wrapping quotes.
+  return new TextDecoder().decode(proc.stdout).trim().toLowerCase().replace(/^"|"$/g, "");
+}
+
+/** The `moov`-before-`mdat` (`+faststart`) check only makes sense for ISO-BMFF containers (mp4/mov). WebM/Matroska is a streaming container natively — there is no moov atom and no faststart concept, so the check is skipped for it. */
+function needsFaststartCheck(filePath: string, formatName: string): boolean {
+  if (/mp4|mov|m4a|3gp|3g2|mj2/.test(formatName)) return true;
+  if (/matroska|webm/.test(formatName)) return false;
+  // Fall back to the extension when ffprobe's format string is unhelpful.
+  return /\.(mp4|mov|m4v)$/i.test(filePath);
+}
+
 /** `+faststart` check: the `moov` atom must appear before `mdat` in the first ~4MB — the #1 cause of "video shows 0:00" in browsers/GitHub (moov-after-mdat forces a full download before any metadata, incl. duration, is known). */
 async function isFaststart(filePath: string): Promise<boolean> {
   const head = await Bun.file(filePath).slice(0, 4_000_000).bytes();
@@ -117,11 +132,16 @@ export async function validateVideo(src: string, minSeconds = 1): Promise<Valida
     }
     console.log(`[validate] duration: ${dur}s (>= ${minSeconds}s) OK`);
 
-    // 2. faststart (moov before mdat)
-    if (!(await isFaststart(filePath))) {
-      return { ok: false, reason: "not +faststart (moov after mdat) — players show 0:00", durationSec: dur };
+    // 2. faststart (moov before mdat) — mp4/mov only; webm has no such concept
+    const formatName = readFormatName(filePath);
+    if (needsFaststartCheck(filePath, formatName)) {
+      if (!(await isFaststart(filePath))) {
+        return { ok: false, reason: "not +faststart (moov after mdat) — players show 0:00", durationSec: dur };
+      }
+      console.log("[validate] faststart (moov before mdat) OK");
+    } else {
+      console.log(`[validate] faststart check N/A for container "${formatName}" (webm/matroska streams natively) — skipped`);
     }
-    console.log("[validate] faststart (moov before mdat) OK");
 
     // 3. clean full decode
     const decode = decodeCleanly(filePath);

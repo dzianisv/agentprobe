@@ -24,11 +24,18 @@ bun core/validate-video.ts <file-or-url> [min_seconds]
 
 It downloads the served bytes (for a URL) and hard-fails unless ALL hold:
 1. `duration >= min_seconds` — catches the 0:00 / empty file.
-2. **`+faststart`: `moov` atom BEFORE `mdat`** — the #1 cause of "video shows 0:00" in browsers/GitHub.
+2. **`+faststart`: `moov` atom BEFORE `mdat`** — the #1 cause of "video shows 0:00" in browsers/GitHub. Applied to **mp4/mov only**; the validator detects the container (`ffprobe format_name`) and skips this check for webm/matroska.
 3. clean full decode (`ffmpeg -f null`) — catches truncated/corrupt streams.
 4. ≥2/3 sampled frames non-blank — catches all-black recordings.
 
 Always run it on the URL after uploading, not just the local file — that proves what the viewer gets.
+
+### Prefer WebM to dodge the faststart pitfall
+WebM/Matroska is a streaming container natively — there is no `moov` atom, so the "shows 0:00" faststart
+bug **cannot** occur. For shareable demos, transcode the mp4 offline (no realtime constraint):
+`ffmpeg -i in.mp4 -c:v libvpx-vp9 -crf 34 -b:v 0 -row-mt 1 -pix_fmt yuv420p out.webm`, then validate it
+(faststart is auto-skipped) and upload. GitHub renders `.webm` in PR/issue/release surfaces. (The realtime
+`core/recording.ts` recorder stays mp4 — libx264 keeps up at 1080p/30fps where VP9 realtime may drop frames.)
 
 ### Building a video so it passes
 - Encode with `-movflags +faststart` (moves `moov` to the front). `core/recording.ts`'s `startRecording`

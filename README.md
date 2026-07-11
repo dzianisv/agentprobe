@@ -37,7 +37,7 @@ The pass/fail verdict is layered, not vibes-based:
 
 ![chrome-sync dual-surface login demo](docs/showcase/chrome-sync-login-dual-surface.gif)
 
-*Left: a real `xterm` running the published `chrome-sync login` CLI. Right: a real Chrome completing the `/auth/cli` form. Both recorded together in CI.* **▶ [Watch the full video (mp4, plays with sound-off)](https://github.com/dzianisv/agentprobe/releases/download/chrome-sync-login-demo/chrome-sync-login-dual-surface.mp4)** — this recording is validated by `core/validate-video.ts` (22.3s, `+faststart`, decodes clean, non-blank).
+*Left: a real `xterm` running the published `chrome-sync login` CLI. Right: a real Chrome completing the `/auth/cli` form. Both recorded together in CI.* **▶ Watch the full video: [webm](https://github.com/dzianisv/agentprobe/releases/download/chrome-sync-login-demo/chrome-sync-login-dual-surface.webm) · [mp4](https://github.com/dzianisv/agentprobe/releases/download/chrome-sync-login-demo/chrome-sync-login-dual-surface.mp4)** — both validated by `core/validate-video.ts` (22.3s, decodes clean, non-blank). WebM is a streaming container natively, so it sidesteps the mp4 `moov`/`+faststart` "shows 0:00" pitfall entirely; the validator applies the faststart check only to mp4/mov.
 
 This runs on every push via the `cua-chrome-sync-login.yml` GitHub Actions workflow (green on `main`).
 Two supporting pieces make the recording trustworthy rather than just present:
