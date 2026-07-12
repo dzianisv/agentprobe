@@ -1,5 +1,7 @@
 # agentprobe
 
+[![Watch the demo](https://img.shields.io/badge/▶-Watch_the_demo-red?style=for-the-badge&logo=youtube)](https://youtu.be/qFeNZg59QJ0)
+
 > **⚡ Works with [H Company](https://hub.hcompany.ai) computer-use models.** agentprobe drives real
 > Android devices and Chrome browsers using H Company's **Holo** grounding models
 > (`holo3-1-35b-a3b` / `holo3-122b-a10b`) — screenshot in, pixel-accurate click coordinates out.
