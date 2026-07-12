@@ -26,3 +26,22 @@ Rules:
 - When the goal is fully achieved respond with {"type": "done", "summary": "..."}.
 - If genuinely stuck after 5+ attempts on the same element respond with {"type": "fail", ...}.
 """
+
+# Appended to SYSTEM_PROMPT when the CUA loop is running with a Holo grounding
+# backend (agentprobe.grounding). Holo resolves the ON-SCREEN LOCATION of an
+# element from a natural-language description; it does not plan. So in this
+# mode, the planner LLM is asked not to guess x/y pixel coordinates itself --
+# it names the element instead, and a separate grounding call fills in x/y
+# before the tap is executed (see run_cua_step in loop.py).
+SYSTEM_PROMPT_HOLO_APPENDIX = """
+
+GROUNDING MODE: coordinates for "tap" are resolved by a separate grounding \
+model, not by you. Do NOT include "x"/"y" in a "tap" action. Instead give a \
+short, unambiguous description of the element in a "target" field:
+  {"type": "tap", "target": "<short description of the element to tap, e.g. \
+'the Wi-Fi toggle switch' or 'the Submit button'>", "reason": "<why>"}
+Keep descriptions specific enough to disambiguate (e.g. include position like \
+"top-right" or nearby text) when multiple similar elements could be on screen.
+All other actions (type, key, swipe, clear_field, wait, screenshot, done, \
+fail) keep their normal schema with literal coordinates where applicable.
+"""

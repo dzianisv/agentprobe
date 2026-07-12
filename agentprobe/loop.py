@@ -6,7 +6,7 @@ from pathlib import Path
 from .android import screenshot_b64, ui_dump, get_screen_size
 from .actions import execute_action
 from .client import make_client
-from .prompts import SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_HOLO_APPENDIX
 from .judge import judge_result
 from .recording import assemble_gif, start_screen_recording, stop_screen_recording
 
@@ -67,6 +67,7 @@ def run_cua_step(
     success_criteria: str = "",
     failure_criteria: str = "",
     system_prompt_extra: str = "",
+    grounding_fn=None,
 ) -> dict:
     """Run the CUA loop for a single goal until done/fail/max_steps.
 
@@ -75,12 +76,21 @@ def run_cua_step(
     {"status": "success"|"failure"|"timeout", "steps": int, "last_screenshot": str}.
 
     Pass a pre-built `client` to reuse it for judging; otherwise one is made here.
+
+    grounding_fn: optional callable(image_b64, description, image_width,
+        image_height) -> (x, y). When provided, this is a two-tier CUA setup:
+        `client`/`model` is the PLANNER (decides *what* to do, e.g. "tap the
+        Settings icon") and grounding_fn is the GROUNDER (turns that
+        description into real pixel coordinates for the "tap" action). See
+        agentprobe.grounding for the Holo implementation. When None (default),
+        the planner model is trusted to emit pixel x/y itself, as before.
     """
     if client is None:
         client, model = make_client(model)
     history = []
     captions = {}  # {filename: reasoning_text} for GIF overlays
-    system = SYSTEM_PROMPT + ("\n\n" + system_prompt_extra if system_prompt_extra else "")
+    holo_appendix = SYSTEM_PROMPT_HOLO_APPENDIX if grounding_fn is not None else ""
+    system = SYSTEM_PROMPT + holo_appendix + ("\n\n" + system_prompt_extra if system_prompt_extra else "")
     screen_w, screen_h = get_screen_size()
     label_prefix = f"[{step_label}] " if step_label else ""
     last_screenshot = ""
@@ -142,6 +152,26 @@ def run_cua_step(
                 print(f"  {label_prefix}[step {step}] Failed to parse: {reply[:120]}")
             continue
 
+        # Holo two-tier mode: planner emitted a "target" description instead
+        # of x/y for a tap -- resolve it to real pixel coordinates now, before
+        # captioning/execution. A grounding failure skips this step (like a
+        # parse failure) rather than aborting the whole run.
+        if grounding_fn is not None and action.get("type") == "tap" and "x" not in action:
+            target = action.get("target", "")
+            if not target:
+                if verbose:
+                    print(f"  {label_prefix}[step {step}] [holo] tap action missing 'target', skipping")
+                continue
+            try:
+                gx, gy = grounding_fn(img_b64, target, screen_w, screen_h)
+                action["x"], action["y"] = gx, gy
+                if verbose:
+                    print(f"  {label_prefix}[step {step}] [holo grounding] '{target}' -> ({gx}, {gy})")
+            except Exception as e:  # noqa: BLE001 -- surfaced via skip, run continues
+                if verbose:
+                    print(f"  {label_prefix}[step {step}] [holo grounding] FAILED: {e}")
+                continue
+
         # Capture action for caption overlay
         action_type = action.get('type', '?')
         action_reason = action.get('reason', '')
@@ -195,12 +225,18 @@ def run_case(
     verbose: bool = True,
     output_dir: str = "/tmp/agentprobe-output",
     speed_multiplier: float = 1.0,
+    grounding_fn=None,
 ) -> dict:
     """Run a TestCase end-to-end and return a verdict.
 
     Drives the device via the CUA loop, judges the final screenshot against the
     case's successCriteria / verification, assembles a demo GIF from the
     per-step screenshots, and writes result.json to output_dir.
+
+    grounding_fn: optional two-tier grounding callable, forwarded to
+        run_cua_step -- see its docstring (agentprobe.grounding.make_grounding_fn
+        builds the Holo one). `model`/the client made from it remains the
+        PLANNER in this mode; grounding_fn resolves tap coordinates.
 
     Returns the loop result augmented with:
         verdict: "pass" | "fail"
@@ -232,6 +268,7 @@ def run_case(
             success_criteria="; ".join(case.successCriteria) if isinstance(case.successCriteria, list) else (case.successCriteria or ""),
             failure_criteria="; ".join(case.failureCriteria) if isinstance(case.failureCriteria, list) else (case.failureCriteria or ""),
             system_prompt_extra=case.systemPromptExtra,
+            grounding_fn=grounding_fn,
         )
     finally:
         rec_local = str(Path(output_dir) / f"{case.name}.mp4")

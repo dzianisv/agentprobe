@@ -1,0 +1,62 @@
+# bench backend registry.
+#
+# Each entry is routed through agentprobe.client.make_client(backend="generic",
+# api_key_env=..., base_url=...) -- see bench/run.py. Adding a new
+# OpenAI-compatible endpoint (e.g. a locally-served open-weight model, or a new
+# vendor) requires zero code changes: just add an entry here.
+#
+# base_url resolution convention: a value of the literal form "${SOME_ENV_VAR}"
+# is substituted at run time with os.environ.get("SOME_ENV_VAR", ""); any other
+# string is used as a literal URL. See bench/README.md for details.
+#
+# cost_per_1m_input / cost_per_1m_output are USD per 1,000,000 tokens. These
+# are best-effort, plausible placeholders for demo purposes -- not verified
+# pricing.
+#
+# TWO-TIER (grounding) backends -- e.g. "holo" below -- are different: Holo is
+# a grounding/localization model (screenshot + element description ->
+# coordinates), not a full agentic planner. A backend entry that sets
+# `planner_model` / `planner_base_url` / `planner_api_key_env` is routed
+# specially by bench/run.py: those three fields configure the PLANNER (any
+# normal chat model, decides *what* to do), while `model` / `base_url` /
+# `api_key_env` configure the GROUNDER (resolves "tap the Settings icon" to
+# real x/y). See agentprobe/grounding.py and agentprobe/loop.py
+# (run_cua_step's grounding_fn) for the implementation.
+
+backends:
+  - name: azure-gpt4o
+    model: gpt-4o-2024-11-20
+    base_url: ${AZURE_DEV_AI_BASE_URL}
+    api_key_env: AZURE_DEV_AI_API_KEY
+    cost_per_1m_input: 2.50
+    cost_per_1m_output: 10.00
+
+  - name: gemini-flash
+    model: gemini-2.0-flash
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    api_key_env: GEMINI_API_KEY
+    cost_per_1m_input: 0.10
+    cost_per_1m_output: 0.40
+
+  - name: grok-vision
+    model: grok-2-vision-1212
+    base_url: https://api.x.ai/v1
+    api_key_env: XAI_API_KEY
+    cost_per_1m_input: 2.00
+    cost_per_1m_output: 10.00
+
+  # H Company Holo -- grounding/localization backend, NOT a standalone planner.
+  # model/base_url/api_key_env below are the GROUNDER (Holo). planner_* fields
+  # are the PLANNER (a normal vision chat model) that Holo's coordinates get
+  # plugged into -- see the note at the top of this file and
+  # agentprobe/grounding.py. holo3-1-35b-a3b is H's free tier (5 req/min);
+  # agentprobe.grounding.HoloRateLimiter throttles calls to stay under that.
+  - name: holo
+    model: holo3-1-35b-a3b
+    base_url: https://api.hcompany.ai/v1/
+    api_key_env: HAI_API_KEY
+    cost_per_1m_input: 0.0
+    cost_per_1m_output: 0.0
+    planner_model: gemini-2.0-flash
+    planner_base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    planner_api_key_env: GEMINI_API_KEY

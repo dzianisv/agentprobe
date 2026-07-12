@@ -141,13 +141,18 @@ def screenshot_b64(label: str = "", output_dir: str = "/tmp") -> str:
                 continue
             raise
 
-    # Fallback: screencap on device then pull
+    # Fallback: screencap on device then pull.
+    # /data/local/tmp (not /sdcard) -- /sdcard is backed by the emulated SD
+    # card / FUSE-mounted external storage, which is not always mounted right
+    # after boot and fails writes with no useful error. /data/local/tmp is a
+    # plain shell-writable directory that's available as soon as the device
+    # answers `adb shell`, and (unlike /sdcard) doesn't need MediaStore/FUSE.
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         path = f.name
     try:
-        subprocess.run(["adb", "shell", "screencap", "-p", "/sdcard/_cua_screen.png"],
+        subprocess.run(["adb", "shell", "screencap", "-p", "/data/local/tmp/_cua_screen.png"],
                        capture_output=True, timeout=30)
-        subprocess.run(["adb", "pull", "/sdcard/_cua_screen.png", path],
+        subprocess.run(["adb", "pull", "/data/local/tmp/_cua_screen.png", path],
                        capture_output=True, timeout=10)
         data = Path(path).read_bytes()
         debug_path.write_bytes(data)
@@ -159,9 +164,9 @@ def screenshot_b64(label: str = "", output_dir: str = "/tmp") -> str:
 def ui_dump(tmp_dir: str = "/tmp") -> str:
     """Dump UI hierarchy XML and return as string."""
     try:
-        adb("shell", "uiautomator", "dump", "/sdcard/_cua_ui.xml")
+        adb("shell", "uiautomator", "dump", "/data/local/tmp/_cua_ui.xml")
         result = subprocess.run(
-            ["adb", "pull", "/sdcard/_cua_ui.xml", f"{tmp_dir}/_cua_ui.xml"],
+            ["adb", "pull", "/data/local/tmp/_cua_ui.xml", f"{tmp_dir}/_cua_ui.xml"],
             capture_output=True, timeout=10,
         )
         if result.returncode == 0:
