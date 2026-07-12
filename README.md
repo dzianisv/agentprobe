@@ -1,5 +1,11 @@
 # agentprobe
 
+> **⚡ Works with [H Company](https://hub.hcompany.ai) computer-use models.** agentprobe drives real
+> Android devices and Chrome browsers using H Company's **Holo** grounding models
+> (`holo3-1-35b-a3b` / `holo3-122b-a10b`) — screenshot in, pixel-accurate click coordinates out.
+> Point it at `https://api.hcompany.ai/v1/` with your `HAI_API_KEY` and it just works. See
+> [Computer-use models](#computer-use-models-h-company-holo).
+
 Test Android apps and browser extensions with a computer-use agent.
 
 An agent looks at screenshots, decides what to tap or type, and runs until the goal is met or the step budget is exhausted. When the run ends, a second vision call judges the final screenshot against the case's success criteria — so a `pass` means the result was actually confirmed on screen, not just claimed by the agent. The run produces a GIF you can inspect to see exactly where it succeeded or got confused.
@@ -47,9 +53,42 @@ Two supporting pieces make the recording trustworthy rather than just present:
   how to get that recording onto a GitHub PR/issue/Release and validate the *served* bytes, not just the
   local file.
 
+## Computer-use models: H Company Holo
+
+agentprobe is model-agnostic (any OpenAI-compatible vision endpoint works), but it is built and
+verified to run on **[H Company](https://hub.hcompany.ai)'s computer-use models**.
+
+H Company's **Holo** models are *grounding/localization* specialists: given a screenshot and a
+short description of a UI element ("the Settings icon"), Holo returns exactly where to click.
+agentprobe pairs Holo with a lightweight planner in a **two-tier loop** — the planner decides
+*what* to do next, Holo resolves *where* on screen it is — so every tap lands on a real,
+model-chosen pixel rather than a guessed coordinate.
+
+| Piece | Role | Default |
+| --- | --- | --- |
+| **Grounder** | screenshot + element description → click coords | `holo3-1-35b-a3b` (free tier, 5 req/min) |
+| **Planner** | decides the next action from the goal + screen | any OpenAI-compatible vision chat model |
+
+Holo returns coordinates normalized to `[0, 1000]`; agentprobe scales them to real pixels
+(`agentprobe/grounding.py:scale_holo_coords`) and throttles calls to respect the free-tier rate
+limit (`HoloRateLimiter`).
+
+```bash
+# 1. Get a key at https://portal.hcompany.ai and export it
+export HAI_API_KEY=...
+
+# 2. Run any case against the Holo backend (grounder=Holo, planner from bench/backends.yaml)
+python -m bench.run --backends holo --cases examples/android/calculator_math.py
+```
+
+The Holo backend is registered in [`bench/backends.yaml`](bench/backends.yaml) — no code changes
+needed to point at `holo3-122b-a10b` (paid) or a self-hosted open-weight Holo checkpoint from
+[Hugging Face](https://huggingface.co/Hcompany).
+
 ## What it is / what it isn't
 
 - **Is**: a test harness that drives a real Android device (via adb) or real Chrome (via CDP) using an LLM agent
+- **Is**: verified against H Company's Holo computer-use grounding models (`api.hcompany.ai`)
 - **Is not**: a record-and-replay tool, a UI automator, or a headless browser test runner
 
 ## Install
