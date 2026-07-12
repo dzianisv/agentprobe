@@ -10,7 +10,22 @@ Test Android apps and browser extensions with a computer-use agent.
 
 An agent looks at screenshots, decides what to tap or type, and runs until the goal is met or the step budget is exhausted. When the run ends, a second vision call judges the final screenshot against the case's success criteria — so a `pass` means the result was actually confirmed on screen, not just claimed by the agent. The run produces a GIF you can inspect to see exactly where it succeeded or got confused.
 
-## Demo: Agents in Action
+## Why this exists
+
+I've been building computer-use (CUA) end-to-end tests across my projects at
+[agentlabs.cc](https://agentlabs.cc) for a while — each one needing a different flavor of E2E
+coverage:
+
+- **[agentpod.agentlabs.cc](https://agentpod.agentlabs.cc)** — agent-pod flows
+- **[vibebrowser.app](https://vibebrowser.app)** — a Chrome extension / AI browser co-pilot
+- **[opencode.agentlabs.cc](https://opencode.agentlabs.cc)** — coding-agent workflows
+
+Every project ended up with its own hand-rolled CUA tests: different surfaces, different pass
+conditions, all requiring real end-to-end testing rather than mocks. For this hackathon I decided to
+**consolidate that knowledge, codebase, and expertise into one open-source CUA framework** — a single
+computer-use agent packaged as an easy-to-install, reusable **GitHub Action** so any codebase can be
+covered with real end-to-end tests. *(Reusable-action coverage across all three projects is still in
+progress.)*
 
 **Android**: Agent solves arithmetic (computes 27 + 18 = 45)
 ![Android Calculator Math](assets/android-calculator-math.gif)
