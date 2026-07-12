@@ -70,6 +70,55 @@ Two supporting pieces make the recording trustworthy rather than just present:
   how to get that recording onto a GitHub PR/issue/Release and validate the *served* bytes, not just the
   local file.
 
+## Building the demo video
+
+The submission/pitch video ([▶ watch](https://youtu.be/qFeNZg59QJ0)) is assembled from the demo GIFs
+already in the repo — no new footage is recorded. Two scripts under `scripts/` do the work:
+
+- **`scripts/build_demo_video.sh`** — stitches the montage: cold-open hook → title card →
+  **live Holo grounding hero shot** → captioned Android / Browser / E2E / dual-surface clips →
+  closing card. Every segment is normalized to a common resolution/fps/pixfmt so the concat demuxer
+  can join them, and `+faststart` is applied so players don't show `0:00`.
+- **`scripts/make_holo_hero.py`** — the "money shot": makes a **real** H Company Holo grounding call
+  on a calculator frame, then animates a reticle snapping to the returned pixel with an INPUT/OUTPUT
+  side panel.
+
+### Run it
+
+```bash
+cd agentprobe
+./scripts/build_demo_video.sh
+# → dist/agentprobe-demo.mp4  (gitignored build artifact)
+```
+
+The hero shot does a live Holo call, so `HAI_API_KEY` must be set (the script auto-sources `.env` if
+present). Everything else is offline.
+
+### Requirements
+
+`ffmpeg` + `ffprobe`, `python3` with **Pillow** (`pip install pillow`), and the font at `FONT`
+(default macOS Arial Bold). Title/caption cards are rendered with Pillow because this ffmpeg build
+has no `drawtext`/libfreetype.
+
+### Overridable via env
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `OUT` | `dist/agentprobe-demo.mp4` | output path |
+| `REPO_URL` | `github.com/dzianisv/a-test` | link on the closing card |
+| `RES` | `1280x720` | output resolution |
+| `FPS` | `30` | output frame rate |
+| `FONT` / `FONT_SUB` | Arial Bold / Arial | card fonts |
+| `HAI_API_KEY` | from `.env` | required for the live Holo hero call |
+
+```bash
+# example: 9:16 vertical cut pointing at the canonical repo
+RES=720x1280 REPO_URL=github.com/dzianisv/agentprobe ./scripts/build_demo_video.sh
+```
+
+To rebuild offline (skip the live Holo call) pass fixed coordinates to the hero script — see
+`scripts/make_holo_hero.py --help` (`--x/--y`).
+
 ## Computer-use models: H Company Holo
 
 agentprobe is model-agnostic (any OpenAI-compatible vision endpoint works), but it is built and
