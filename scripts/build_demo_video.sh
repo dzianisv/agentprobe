@@ -24,6 +24,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT="${OUT:-dist/agentprobe-demo.mp4}"
+REPO_URL="${REPO_URL:-github.com/dzianisv/a-test}"
 FONT="${FONT:-/System/Library/Fonts/Supplemental/Arial Bold.ttf}"
 FONT_SUB="${FONT_SUB:-/System/Library/Fonts/Supplemental/Arial.ttf}"
 RES="${RES:-1280x720}"
@@ -35,6 +36,9 @@ command -v ffprobe >/dev/null || { echo "ffprobe not found on PATH" >&2; exit 1;
 command -v python3 >/dev/null || { echo "python3 not found on PATH" >&2; exit 1; }
 python3 -c "import PIL" 2>/dev/null || { echo "Pillow (PIL) required: pip install pillow" >&2; exit 1; }
 [ -f "$FONT" ] || { echo "font not found: $FONT (set FONT=...)" >&2; exit 1; }
+
+# The hero shot does a live Holo grounding call — needs HAI_API_KEY.
+if [ -z "${HAI_API_KEY:-}" ] && [ -f .env ]; then set -a; . ./.env; set +a; fi
 
 # Source clips (relative to repo root). Each: gif path.
 GIF_ANDROID="assets/android-calculator-math.gif"
@@ -106,18 +110,85 @@ make_clip() {
   echo "$out"
 }
 
+# render_caption_png <out.png> <text> — transparent overlay with a lower-third
+# caption bar (used by make_clip_captioned).
+render_caption_png() {
+  OUT_PNG="$1" CAP="$2" CARD_W="$W" CARD_H="$H" CARD_FONT="$FONT" \
+  python3 - <<'PY'
+import os
+from PIL import Image, ImageDraw, ImageFont
+W=int(os.environ["CARD_W"]); H=int(os.environ["CARD_H"])
+out=os.environ["OUT_PNG"]; cap=os.environ.get("CAP","")
+fbold=os.environ["CARD_FONT"]
+img=Image.new("RGBA",(W,H),(0,0,0,0))
+d=ImageDraw.Draw(img)
+def font(size):
+    try: return ImageFont.truetype(fbold,size)
+    except Exception: return ImageFont.load_default()
+f=font(34)
+# lower-third gradient-ish bar
+bar_h=110
+d.rectangle([0,H-bar_h,W,H], fill=(8,11,15,205))
+d.rectangle([0,H-bar_h,W,H-bar_h+4], fill=(0,255,170,255))
+bb=d.textbbox((0,0),cap,font=f); tw=bb[2]-bb[0]
+d.text(((W-tw)//2, H-bar_h+36), cap, font=f, fill=(255,255,255,255))
+img.save(out)
+PY
+}
+
+# make_clip_captioned <index> <gif> <caption> [speed_factor]
+make_clip_captioned() {
+  local idx="$1" gif="$2" cap="$3" speed="${4:-1}"
+  local out="$WORK/seg_${idx}.mp4" cpng="$WORK/cap_${idx}.png"
+  render_caption_png "$cpng" "$cap"
+  local pre=""
+  if [ "$speed" != "1" ]; then pre="setpts=PTS/${speed},"; fi
+  ffmpeg -y -loglevel error -i "$gif" -i "$cpng" \
+    -filter_complex "[0:v]${pre}${SCALE_PAD}[v];[v][1:v]overlay=0:0:format=auto[o]" \
+    -map "[o]" "${COMMON[@]}" "$out"
+  echo "$out"
+}
+
+# make_hero <index> — live H Company Holo grounding "money shot": grounds an
+# element on a real calculator frame and animates a reticle onto the returned
+# pixel. Requires HAI_API_KEY (auto-sourced from ./.env below if present).
+make_hero() {
+  local idx="$1"
+  local out="$WORK/seg_${idx}.mp4" hdir="$WORK/hero"
+  local frame="$WORK/hero_frame.png"
+  ffmpeg -y -loglevel error -i "$GIF_ANDROID" -vf "select=eq(n\,0)" -frames:v 1 "$frame"
+  rm -rf "$hdir"; mkdir -p "$hdir"
+  local args=(scripts/make_holo_hero.py "$frame" "${HERO_TARGET:-the number 7 key}" "$hdir"
+              --width "$W" --height "$H" --fps "$FPS" --frames "${HERO_FRAMES:-70}")
+  if [ -n "${HERO_X:-}" ] && [ -n "${HERO_Y:-}" ]; then args+=(--x "$HERO_X" --y "$HERO_Y"); fi
+  python3 "${args[@]}" >&2
+  ffmpeg -y -loglevel error -framerate "$FPS" -i "$hdir/hero_%03d.png" \
+    -vf "format=yuv420p,fps=${FPS}" "${COMMON[@]}" "$out"
+  echo "$out"
+}
+
 echo "Building segments..."
 SEGS=()
-SEGS+=("$(make_card 00 4 "agentprobe" "Computer-use testing on H Company Holo" "Real Android + Chrome, driven by Holo grounding")")
-SEGS+=("$(make_card 01 2 "Android" "agent solves a real task" "computes 27 + 18 = 45 on a live emulator")")
-SEGS+=("$(make_clip 02 "$GIF_ANDROID")")
-SEGS+=("$(make_card 03 2 "Browser" "agent verifies a live web app" "confirms extension published on Chrome Web Store")")
-SEGS+=("$(make_clip 04 "$GIF_BROWSER")")
-SEGS+=("$(make_card 05 2 "End-to-end" "install, sign in, then an agentic task" "every step asserted + screen-recorded")")
-SEGS+=("$(make_clip 06 "$GIF_E2E")")
-SEGS+=("$(make_card 07 2 "Dual-surface" "terminal + browser, one recording" "CLI on the left drives Chrome auth on the right")")
-SEGS+=("$(make_clip 08 "$GIF_DUAL")")
-SEGS+=("$(make_card 09 4 "Powered by H Company Holo" "grounder holo3-1-35b-a3b via api.hcompany.ai" "github.com/dzianisv/agentprobe")")
+# 0. COLD OPEN — hook first (E2E footage sped up), caption over it, no card.
+SEGS+=("$(make_clip_captioned 00 "$GIF_E2E" "What if an AI could test your app for you?" 3)")
+# 1. TITLE
+SEGS+=("$(make_card 01 3 "agentprobe" "Computer-use testing on H Company Holo" "Android · Chrome · Terminal — one agent")")
+# 2. HERO — live Holo grounding money shot
+SEGS+=("$(make_hero 02)")
+# 3-4. Android
+SEGS+=("$(make_card 03 1.6 "Android" "agent solves a real task" "")")
+SEGS+=("$(make_clip_captioned 04 "$GIF_ANDROID" "Computes 27 + 18 = 45 — real taps, not selectors")")
+# 5-6. Browser
+SEGS+=("$(make_card 05 1.6 "Browser" "agent verifies a live web app" "")")
+SEGS+=("$(make_clip_captioned 06 "$GIF_BROWSER" "Confirms the extension is live on the Chrome Web Store" 1.5)")
+# 7-8. End-to-end
+SEGS+=("$(make_card 07 1.6 "End-to-end" "install → sign in → agentic task" "")")
+SEGS+=("$(make_clip_captioned 08 "$GIF_E2E" "Installs, signs in, runs a task — every step asserted")")
+# 9-10. Dual-surface
+SEGS+=("$(make_card 09 1.6 "Dual-surface" "terminal + browser, one recording" "")")
+SEGS+=("$(make_clip_captioned 10 "$GIF_DUAL" "A CLI drives a browser sign-in — recorded together" 2)")
+# 11. CLOSING
+SEGS+=("$(make_card 11 4 "Powered by H Company Holo" "grounder holo3-1-35b-a3b via api.hcompany.ai" "$REPO_URL")")
 
 # concat demuxer list
 LIST="$WORK/list.txt"
@@ -136,5 +207,6 @@ echo "OK: $OUT"
 echo "duration=${DUR}s  (video ${WHV})"
 awk -v d="$DUR" 'BEGIN{ if (d+0 > 120) { print "WARNING: duration exceeds 120s"; } }'
 echo "segments (in order):"
-printf '  %s\n' "title(4s)" "card:Android(2s)" "android(4.84s)" "card:Browser(2s)" "browser(10.56s)" \
-  "card:E2E(2s)" "e2e(7.25s)" "card:Dual(2s)" "dual-surface(22.33s)" "closing(4s)"
+printf '  %s\n' "cold-open hook (E2E 3x)" "title(3s)" "HOLO grounding hero (live)" \
+  "card:Android" "android+caption" "card:Browser" "browser+caption(1.5x)" \
+  "card:E2E" "e2e+caption" "card:Dual" "dual+caption(2x)" "closing(4s)"
