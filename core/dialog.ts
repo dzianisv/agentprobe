@@ -101,6 +101,18 @@ export type TriggerAndHandleJsDialogOptions = {
  * synchronously), so the dialog can never open before anything is
  * listening. Returns the dialog's details for assertion (e.g. checking the
  * confirm message text) after accepting/dismissing it.
+ *
+ * Deliberately does NOT `await trigger()` before waiting for the dialog.
+ * If `trigger` issues a CDP command whose own response only arrives once
+ * its JS finishes running synchronously (e.g. `Runtime.evaluate` on a
+ * `.click()` whose handler calls `window.confirm()`), that command's
+ * promise will not resolve until the dialog itself is dismissed — Chrome
+ * suspends the renderer for the lifetime of the dialog. Awaiting `trigger()`
+ * first would deadlock: this function would never reach the code that
+ * dismisses the dialog. Instead, `trigger()` is started and raced against
+ * the dialog wait; the dialog is handled first (unblocking the renderer),
+ * and `trigger()`'s own promise (and any error it throws) is only awaited
+ * afterward, once it is actually able to resolve.
  */
 export async function triggerAndHandleJsDialog(
   browserWs: WebSocket,
@@ -109,8 +121,24 @@ export async function triggerAndHandleJsDialog(
   opts: TriggerAndHandleJsDialogOptions = { accept: true }
 ): Promise<JsDialogEvent> {
   const dialogPromise = waitForJsDialogOpening(browserWs, sessionId, { timeoutMs: opts.timeoutMs });
-  await trigger();
+
+  // Start `trigger` without awaiting it yet (see deadlock note above). Any
+  // rejection is captured now (so it is never an unhandled rejection) and
+  // re-thrown after the dialog is handled, once we actually await it.
+  let triggerError: unknown;
+  const triggerPromise = Promise.resolve()
+    .then(() => trigger())
+    .catch((err) => {
+      triggerError = err;
+    });
+
   const dialog = await dialogPromise;
   await handleJsDialog(browserWs, sessionId, { accept: opts.accept, promptText: opts.promptText });
+
+  // Handling the dialog unblocks the renderer, so any CDP command `trigger`
+  // issued (e.g. the click's Runtime.evaluate) can now actually complete.
+  await triggerPromise;
+  if (triggerError) throw triggerError;
+
   return dialog;
 }
