@@ -7,6 +7,17 @@
 import { readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+/**
+ * Structural (not import-time) dependency on Playwright's `Page.screenshot`
+ * shape — deliberately not `import type { Page } from "playwright"` so this
+ * package never needs `playwright` as a dependency. Any object with a
+ * matching `screenshot()` method (a real Playwright `Page`, or a test
+ * double) satisfies this.
+ */
+export type ScreenshotCapable = {
+  screenshot(options?: { type?: "png" | "jpeg"; fullPage?: boolean }): Promise<Buffer | Uint8Array>;
+};
+
 export type StartRecordingOptions = {
   outputDir: string;
   displayWidth?: number; // default 1920
@@ -87,6 +98,90 @@ export async function finalizeRecording(opts: FinalizeRecordingOptions): Promise
   if (exitCode !== 0 || !(await Bun.file(remuxedPath).exists())) return; // best-effort: leave original in place
 
   await rename(remuxedPath, filePath);
+}
+
+export type StartPageFrameCaptureOptions = {
+  /** Any Playwright-`Page`-shaped object (see `ScreenshotCapable`) — no CDP/X11/xdotool involved. */
+  page: ScreenshotCapable;
+  outputDir: string;
+  /** Background capture cadence. default 1000 */
+  intervalMs?: number;
+  /** Filename prefix — keep it one of `assembleGif`'s default `framePattern` alternatives ("stage" | "step") unless you also pass a custom `framePattern` to `assembleGif`. default "step" */
+  framePrefix?: string;
+  fullPage?: boolean; // default true
+};
+
+export type PageFrameCaptureHandle = {
+  /** Stop the background interval loop and await its in-flight capture, if any. Idempotent. */
+  stop(): Promise<void>;
+  /**
+   * Take one additional frame right now, outside the interval cadence —
+   * for event-driven proof shots (e.g. immediately after a click, right
+   * before an assertion) so a fast-moving step is never left to chance
+   * between two interval ticks. `label` is slugified into the filename so
+   * the frame is identifiable on disk without opening it.
+   */
+  captureNamed(label: string): Promise<string>;
+  /** Total frames captured so far (interval + named). */
+  frameCount(): number;
+};
+
+/**
+ * Playwright-`Page`-screenshot-interval capture: the browser-visible-tab
+ * counterpart to `startRecording`'s X11-grab video. Where `startRecording`
+ * needs a real X server (Xvfb + `ffmpeg -f x11grab`) and is the right choice
+ * for capturing native browser chrome / OS-level dialogs, this primitive
+ * needs neither — it drives `page.screenshot()` directly, so it works
+ * headless, inside a plain CI runner, with no display at all. Frames are
+ * named to satisfy `assembleGif`'s default `framePattern`
+ * (`/^(stage|step)-\d+.*\.png$/`), so the two primitives compose: capture
+ * frames with this, then hand `outputDir` straight to `assembleGif`.
+ *
+ * Generalizes the interval-screenshot-loop capability that several
+ * downstream projects were independently hand-rolling (e.g. OpenClawBot's
+ * `tests/e2e/lib/gif-recorder.ts`) into one shared, tested primitive.
+ */
+export function startPageFrameCapture(opts: StartPageFrameCaptureOptions): PageFrameCaptureHandle {
+  const { page, outputDir, intervalMs = 1000, framePrefix = "step", fullPage = true } = opts;
+  let n = 0;
+  let stopped = false;
+
+  async function captureOne(label?: string): Promise<string> {
+    n += 1;
+    const index = String(n).padStart(3, "0");
+    const slug = label ? `-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}` : "";
+    const filePath = path.join(outputDir, `${framePrefix}-${index}${slug}.png`);
+    const buf = await page.screenshot({ type: "png", fullPage });
+    await writeFile(filePath, buf);
+    return filePath;
+  }
+
+  async function loop(): Promise<void> {
+    while (!stopped) {
+      try {
+        await captureOne();
+      } catch (error) {
+        // Best-effort, matching startRecording's philosophy: one failed
+        // interval capture (e.g. page mid-navigation) must not kill the
+        // whole recording — the next tick tries again.
+        console.warn(`[recording] startPageFrameCapture: interval capture failed: ${(error as Error).message}`);
+      }
+      if (stopped) break;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+
+  const loopPromise = loop();
+
+  return {
+    async stop() {
+      if (stopped) return;
+      stopped = true;
+      await loopPromise;
+    },
+    captureNamed: (label: string) => captureOne(label),
+    frameCount: () => n
+  };
 }
 
 export type AssembleGifOptions = {
