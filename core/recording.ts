@@ -254,3 +254,73 @@ export async function assembleGif(opts: AssembleGifOptions): Promise<void> {
   );
   await pass2.exited;
 }
+
+export type AssembleVideoOptions = {
+  outputDir: string;
+  /** Filename pattern for frames to include, tested with `RegExp.test`. Default matches `stage-NN-*.png` / `step-NN-*.png` (lexicographic order plays frames in order). */
+  framePattern?: RegExp;
+  frameDurationSec?: number; // default 1.5
+  scaleWidth?: number; // default 1280 (must be even for yuv420p)
+  fileName?: string; // default "video.mp4"
+};
+
+/**
+ * Assemble an MP4 from `outputDir`'s frame screenshots — the video-file
+ * counterpart to `assembleGif`. Same concat-demuxer input (each frame held
+ * for `frameDurationSec`, frames sorted lexicographically so a naming
+ * convention with a sortable prefix controls playback order), but encoded as
+ * H.264 instead of a palette-quantized GIF: smaller output for long/high-fps
+ * sequences, and playable in-place by GitHub / any `<video>` element.
+ *
+ * `+faststart` is applied at encode time (matching `startRecording`'s live
+ * X11-grab path) so the moov atom lands before mdat and the file is
+ * immediately seekable — see `validate-video.ts`'s faststart check, which
+ * exists because that ordering is the #1 cause of a video showing 0:00 in a
+ * browser/GitHub player.
+ *
+ * No-ops if no frames match `framePattern`, same as `assembleGif`.
+ */
+export async function assembleVideo(opts: AssembleVideoOptions): Promise<void> {
+  const {
+    outputDir,
+    framePattern = /^(stage|step)-\d+.*\.png$/,
+    frameDurationSec = 1.5,
+    scaleWidth = 1280,
+    fileName = "video.mp4"
+  } = opts;
+
+  const files = await readdir(outputDir);
+  const pngs = files
+    .filter((f) => framePattern.test(f))
+    .sort()
+    .map((f) => path.join(outputDir, f));
+
+  if (pngs.length === 0) return;
+
+  // Separate concat list from assembleGif's frames.txt so both can be run
+  // against the same outputDir without clobbering each other.
+  const lines: string[] = [];
+  for (const p of pngs) {
+    lines.push(`file '${p}'`);
+    lines.push(`duration ${frameDurationSec}`);
+  }
+  lines.push(`file '${pngs[pngs.length - 1]}'`);
+  const listPath = path.join(outputDir, "video-frames.txt");
+  await writeFile(listPath, lines.join("\n"));
+
+  const videoPath = path.join(outputDir, fileName);
+  const proc = Bun.spawn(
+    [
+      "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+      "-i", listPath,
+      "-vf", `scale=${scaleWidth}:-2:flags=lanczos,format=yuv420p`,
+      "-c:v", "libx264",
+      "-preset", "medium",
+      "-crf", "20",
+      "-movflags", "+faststart",
+      videoPath
+    ],
+    { stdout: "ignore", stderr: Bun.file(path.join(outputDir, "ffmpeg-assemble-video.log")) }
+  );
+  await proc.exited;
+}
