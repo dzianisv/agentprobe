@@ -58,6 +58,14 @@ export function startChrome(opts: StartChromeOptions): Bun.Subprocess {
     "--disable-dev-shm-usage",
     "--no-first-run",
     "--no-default-browser-check",
+    // Xvfb has no real window manager, so Chrome's native-window-occlusion
+    // detector (and the renderer-backgrounding/timer-throttling it feeds)
+    // can misfire on an otherwise-foreground tab, intermittently stopping
+    // compositing mid-run — the root cause of the blank/stale-frame CI
+    // flake this disables (AGE-745 / agentprobe startPageFrameCapture fix).
+    "--disable-features=CalculateNativeWinOcclusion,BackgroundingOccludedWindows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
     `--window-position=${windowPositionX},${windowPositionY}`,
     `--window-size=${displayWidth},${displayHeight}`,
     `--user-data-dir=${userDataDir}`,
