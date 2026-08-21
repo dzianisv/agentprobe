@@ -15,6 +15,19 @@
 
 import sharp from "sharp";
 
+// Node-safe sleep (no `Bun.sleep`): `captureUntilPainted` /
+// `captureBufferUntilPainted` are reachable from `core/recording.ts`'s
+// `startPageFrameCapture`, which is imported directly (in-process, not via a
+// `bun <path>` CLI entrypoint) by plain-Node consumers such as AgentPod's
+// vitest-driven `FrameRecorder` — `Bun.sleep` there throws
+// `ReferenceError: Bun is not defined` and, worse, that throw is swallowed by
+// the caller's try/catch, silently skipping the retry this file exists to
+// provide (observed live: CI run 32493750173, blank stripe-checkout GIF
+// shipped as "evidence" while `captureNamed` logged exactly this error).
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export type BlankFrameOptions = {
   contentTop: number;
   contentBottomMargin: number;
@@ -73,7 +86,7 @@ export async function captureUntilPainted(screenshotFn: () => Promise<string>, o
       `[blank-frame]${prefix} capture attempt ${attempt}/${attempts} content-region near-white fraction=${whiteFraction.toFixed(4)} (blank threshold ${opts.whiteFraction})`
     );
     if (whiteFraction < opts.whiteFraction) return lastPath;
-    if (attempt < attempts) await Bun.sleep(retryDelayMs);
+    if (attempt < attempts) await sleep(retryDelayMs);
   }
   throw new Error(
     `captureUntilPainted${prefix}: screen content region still ${(whiteFraction * 100).toFixed(2)}% near-white (blank/unpainted) after ${attempts} capture attempts`
@@ -123,7 +136,7 @@ export async function captureBufferUntilPainted(
     console.warn(
       `[blank-frame]${prefix} capture attempt ${attempt}/${attempts} near-white fraction=${whiteFraction.toFixed(4)} (blank threshold ${whiteFractionThreshold}) — retrying`
     );
-    if (attempt < attempts) await Bun.sleep(retryDelayMs);
+    if (attempt < attempts) await sleep(retryDelayMs);
   }
   throw new Error(
     `captureBufferUntilPainted${prefix}: capture still ${(whiteFraction * 100).toFixed(2)}% near-white (blank/unpainted) after ${attempts} attempts`
