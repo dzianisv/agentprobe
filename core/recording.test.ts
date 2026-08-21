@@ -14,7 +14,7 @@ import path from "node:path";
 
 import { startPageFrameCapture, type ScreenshotCapable } from "./recording";
 import { captureBufferUntilPainted } from "./blank-frame";
-import { waitForPageOwnPaintSettle } from "./paint";
+import { waitForPageOwnPaintSettle, type EvaluateCapable } from "./paint";
 
 async function whitePngBuffer(): Promise<Buffer> {
   // 1x1 white PNG, upscaled at read-time isn't needed — bufferNearWhiteFraction
@@ -139,7 +139,6 @@ describe("startPageFrameCapture — paint-gate + blank-frame retry wiring (AGE-7
   test("captureBufferUntilPainted retries past a blank capture without calling Bun.sleep", async () => {
     const realSleep = Bun.sleep;
     try {
-      // @ts-expect-error -- intentional monkey-patch for this assertion only
       Bun.sleep = () => {
         throw new ReferenceError("Bun is not defined");
       };
@@ -164,18 +163,17 @@ describe("startPageFrameCapture — paint-gate + blank-frame retry wiring (AGE-7
   test("waitForPageOwnPaintSettle polls without calling Bun.sleep", async () => {
     const realSleep = Bun.sleep;
     try {
-      // @ts-expect-error -- intentional monkey-patch for this assertion only
       Bun.sleep = () => {
         throw new ReferenceError("Bun is not defined");
       };
 
       let calls = 0;
-      const page = {
-        async evaluate() {
+      const page: EvaluateCapable = {
+        async evaluate<T>() {
           calls++;
           // Force at least one poll iteration (and therefore one retry-delay
           // call) before reporting painted.
-          return calls === 1 ? "readyState=loading" : "painted";
+          return (calls === 1 ? "readyState=loading" : "painted") as T;
         }
       };
 
