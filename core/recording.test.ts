@@ -13,6 +13,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { startPageFrameCapture, type ScreenshotCapable } from "./recording";
+import { captureBufferUntilPainted } from "./blank-frame";
+import { waitForPageOwnPaintSettle } from "./paint";
 
 async function whitePngBuffer(): Promise<Buffer> {
   // 1x1 white PNG, upscaled at read-time isn't needed — bufferNearWhiteFraction
@@ -106,6 +108,81 @@ describe("startPageFrameCapture — paint-gate + blank-frame retry wiring (AGE-7
       expect(written.length).toBeGreaterThan(0);
     } finally {
       await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression for the live incident this bump surfaced (CI run 32493750171,
+  // AGE-814): `captureNamed` failed with "Bun is not defined" and that throw
+  // was swallowed, silently skipping the paint-gate/blank-frame retry and
+  // shipping a genuinely blank stripe-checkout GIF as passing evidence.
+  // `startPageFrameCapture` is imported directly (in-process, not via a
+  // `bun <path>` CLI entrypoint) by plain-Node consumers (AgentPod's
+  // vitest-driven `FrameRecorder`), so every function reachable from
+  // `captureNamed` must not depend on the `Bun` global. `bun test` itself
+  // can't catch this — `Bun` is always defined under the Bun runtime — so
+  // this test deletes `globalThis.Bun` for the duration of the call to prove
+  // the reachable path (`waitForPageOwnPaintSettle`, `captureBufferUntilPainted`)
+  // is Node-safe.
+  // Regression for the live incident this bump surfaced (CI run 32493750173,
+  // AGE-814): `captureNamed` failed with "Bun is not defined" and that throw
+  // was swallowed by `startPageFrameCapture`'s best-effort catch, silently
+  // skipping the paint-gate/blank-frame retry and shipping a genuinely blank
+  // stripe-checkout GIF as passing evidence. Both `waitForPageOwnPaintSettle`
+  // and `captureBufferUntilPainted` are reachable in-process (not via a
+  // `bun <path>` CLI entrypoint) from plain-Node consumers such as
+  // AgentPod's vitest-driven `FrameRecorder`, so neither may depend on the
+  // `Bun` global. `bun test` itself can't catch this directly (`Bun` is
+  // always defined under the Bun runtime), so these tests patch `Bun.sleep`
+  // to throw exactly the `ReferenceError: Bun is not defined` a bare
+  // `Bun.sleep` reference throws under Node, and prove the retry path still
+  // completes — i.e. it no longer calls `Bun.sleep` at all.
+  test("captureBufferUntilPainted retries past a blank capture without calling Bun.sleep", async () => {
+    const realSleep = Bun.sleep;
+    try {
+      // @ts-expect-error -- intentional monkey-patch for this assertion only
+      Bun.sleep = () => {
+        throw new ReferenceError("Bun is not defined");
+      };
+
+      let calls = 0;
+      const { buf, whiteFraction } = await captureBufferUntilPainted(
+        async () => {
+          calls++;
+          return calls === 1 ? whitePngBuffer() : redPngBuffer();
+        },
+        { attempts: 2, retryDelayMs: 5 }
+      );
+
+      expect(calls).toBe(2);
+      expect(whiteFraction).toBeLessThan(0.995);
+      expect(buf.length).toBeGreaterThan(0);
+    } finally {
+      Bun.sleep = realSleep;
+    }
+  });
+
+  test("waitForPageOwnPaintSettle polls without calling Bun.sleep", async () => {
+    const realSleep = Bun.sleep;
+    try {
+      // @ts-expect-error -- intentional monkey-patch for this assertion only
+      Bun.sleep = () => {
+        throw new ReferenceError("Bun is not defined");
+      };
+
+      let calls = 0;
+      const page = {
+        async evaluate() {
+          calls++;
+          // Force at least one poll iteration (and therefore one retry-delay
+          // call) before reporting painted.
+          return calls === 1 ? "readyState=loading" : "painted";
+        }
+      };
+
+      await waitForPageOwnPaintSettle(page, "smoke", 2_000);
+      expect(calls).toBeGreaterThanOrEqual(2);
+    } finally {
+      Bun.sleep = realSleep;
     }
   });
 });

@@ -12,6 +12,15 @@
 
 import { cdpSend } from "./cdp";
 
+// Node-safe sleep for `waitForPageOwnPaintSettle`, which `core/recording.ts`'s
+// `startPageFrameCapture` calls in-process from plain-Node consumers (see
+// same rationale in `core/blank-frame.ts`) — `Bun.sleep` there threw
+// `ReferenceError: Bun is not defined` under Node, silently defeating the
+// paint gate this function exists to provide.
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Structural (not import-time) dependency on Playwright's `Page.evaluate` —
  * deliberately not `import type { Page } from "playwright"` so this module
@@ -67,7 +76,7 @@ export async function waitForPageOwnPaintSettle(
     } catch (err) {
       last = `(evaluate error: ${(err as Error).message})`;
     }
-    await Bun.sleep(100);
+    await sleep(100);
   }
   console.log(`[paint] paint settle for "${label}": no double-rAF confirmation within ${timeoutMs}ms (last: ${last}) — proceeding, blank-capture guard will recheck`);
 }
