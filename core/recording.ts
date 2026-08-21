@@ -7,16 +7,22 @@
 import { readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { captureBufferUntilPainted } from "./blank-frame";
+import { waitForPageOwnPaintSettle, type EvaluateCapable } from "./paint";
+
 /**
  * Structural (not import-time) dependency on Playwright's `Page.screenshot`
  * shape — deliberately not `import type { Page } from "playwright"` so this
  * package never needs `playwright` as a dependency. Any object with a
  * matching `screenshot()` method (a real Playwright `Page`, or a test
- * double) satisfies this.
+ * double) satisfies this. `evaluate` is optional — when present (a real
+ * Playwright `Page` has one), `startPageFrameCapture` uses it to paint-gate
+ * each capture via `waitForPageOwnPaintSettle`; a bare test double without
+ * it still gets the blank-frame retry alone.
  */
 export type ScreenshotCapable = {
   screenshot(options?: { type?: "png" | "jpeg"; fullPage?: boolean }): Promise<Buffer | Uint8Array>;
-};
+} & Partial<EvaluateCapable>;
 
 export type StartRecordingOptions = {
   outputDir: string;
@@ -109,6 +115,14 @@ export type StartPageFrameCaptureOptions = {
   /** Filename prefix — keep it one of `assembleGif`'s default `framePattern` alternatives ("stage" | "step") unless you also pass a custom `framePattern` to `assembleGif`. default "step" */
   framePrefix?: string;
   fullPage?: boolean; // default true
+  /** Paint-gate each capture with `waitForPageOwnPaintSettle` before screenshotting, when `page.evaluate` is available. default true */
+  paintGate?: boolean;
+  /** Retry a capture up to N times when it comes back near-blank/unpainted (see `captureBufferUntilPainted`). default true */
+  blankFrameGuard?: boolean;
+  /** Near-white fraction above which a capture is treated as blank. default 0.995 (see `BLANK_FRAME_DEFAULTS`) */
+  blankFrameWhiteFraction?: number;
+  /** Capture attempts before giving up on a blank frame. default 3 */
+  blankFrameAttempts?: number;
 };
 
 export type PageFrameCaptureHandle = {
@@ -142,7 +156,17 @@ export type PageFrameCaptureHandle = {
  * `tests/e2e/lib/gif-recorder.ts`) into one shared, tested primitive.
  */
 export function startPageFrameCapture(opts: StartPageFrameCaptureOptions): PageFrameCaptureHandle {
-  const { page, outputDir, intervalMs = 1000, framePrefix = "step", fullPage = true } = opts;
+  const {
+    page,
+    outputDir,
+    intervalMs = 1000,
+    framePrefix = "step",
+    fullPage = true,
+    paintGate = true,
+    blankFrameGuard = true,
+    blankFrameWhiteFraction,
+    blankFrameAttempts
+  } = opts;
   let n = 0;
   let stopped = false;
 
@@ -151,7 +175,31 @@ export function startPageFrameCapture(opts: StartPageFrameCaptureOptions): PageF
     const index = String(n).padStart(3, "0");
     const slug = label ? `-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}` : "";
     const filePath = path.join(outputDir, `${framePrefix}-${index}${slug}.png`);
-    const buf = await page.screenshot({ type: "png", fullPage });
+
+    // 1. Paint-gate: confirm the renderer actually produced a fresh frame
+    // for whatever's on screen right now (closes the Xvfb native-window-
+    // occlusion / renderer-backgrounding gap — see `waitForPageOwnPaintSettle`).
+    // Only possible when `page` is evaluate-capable (a real Playwright Page);
+    // non-throwing on timeout, so a slow/never-settling page degrades to the
+    // blank-frame retry below rather than blocking the capture loop forever.
+    if (paintGate && typeof page.evaluate === "function") {
+      await waitForPageOwnPaintSettle(page as EvaluateCapable, label ?? `frame ${index}`);
+    }
+
+    // 2. Blank-frame retry: reject and re-shoot a capture that still comes
+    // back near-blank/unpainted after the paint gate (e.g. paint-gate timed
+    // out, or the renderer re-occludes between the gate and the shot).
+    const takeShot = () => page.screenshot({ type: "png", fullPage });
+    const buf = blankFrameGuard
+      ? (
+          await captureBufferUntilPainted(takeShot, {
+            whiteFraction: blankFrameWhiteFraction,
+            attempts: blankFrameAttempts,
+            label: label ?? `frame ${index}`
+          })
+        ).buf
+      : await takeShot();
+
     await writeFile(filePath, buf);
     return filePath;
   }
@@ -162,8 +210,9 @@ export function startPageFrameCapture(opts: StartPageFrameCaptureOptions): PageF
         await captureOne();
       } catch (error) {
         // Best-effort, matching startRecording's philosophy: one failed
-        // interval capture (e.g. page mid-navigation) must not kill the
-        // whole recording — the next tick tries again.
+        // interval capture (e.g. page mid-navigation, or every blank-frame
+        // retry attempt still blank) must not kill the whole recording —
+        // the next tick tries again.
         console.warn(`[recording] startPageFrameCapture: interval capture failed: ${(error as Error).message}`);
       }
       if (stopped) break;

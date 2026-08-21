@@ -9,6 +9,9 @@
     "type": "git",
     "url": "https://github.com/dzianisv/agentprobe"
   },
+  "scripts": {
+    "test": "bun test core"
+  },
   "dependencies": {
     "openai": "^6",
     "sharp": "^0.35"

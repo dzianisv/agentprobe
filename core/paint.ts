@@ -13,6 +13,66 @@
 import { cdpSend } from "./cdp";
 
 /**
+ * Structural (not import-time) dependency on Playwright's `Page.evaluate` —
+ * deliberately not `import type { Page } from "playwright"` so this module
+ * never needs `playwright` as a dependency (matches `core/recording.ts`'s
+ * `ScreenshotCapable` pattern). Any object with a matching `evaluate()`
+ * method (a real Playwright `Page`, or a test double) satisfies this.
+ */
+export type EvaluateCapable = {
+  evaluate<T>(pageFunction: () => T | Promise<T>): Promise<T>;
+};
+
+const PAINT_SETTLE_EXPRESSION = () =>
+  new Promise<string>((resolve) => {
+    if (document.readyState !== "complete") {
+      resolve(`readyState=${document.readyState}`);
+      return;
+    }
+    setTimeout(() => resolve("raf-timeout"), 2000);
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve("painted")));
+  });
+
+/**
+ * `waitForPaintSettle`'s Playwright-`Page`-only counterpart: same
+ * readyState + double-rAF gate, driven through `page.evaluate()` instead of
+ * a raw CDP `Runtime.evaluate` call, for callers (like
+ * `core/recording.ts`'s `startPageFrameCapture`) that only have a
+ * Playwright `Page` and no CDP `browserWs`/`sessionId` pair.
+ *
+ * This is what closes the gap `startPageFrameCapture` was missing under
+ * Xvfb: Chrome's native-window-occlusion / renderer-backgrounding behavior
+ * can intermittently stop compositing an occluded target between paint and
+ * the next `page.screenshot()` tick; a bare interval capture with no gate
+ * accepts whatever `Page.captureScreenshot` returns (including a blank or
+ * stale frame) instead of first confirming the renderer actually produced
+ * a fresh frame. Same non-throwing timeout behavior as `waitForPaintSettle`
+ * — the blank-frame retry (`captureUntilPainted` / `captureBufferUntilPainted`
+ * in `core/blank-frame.ts`) is always the second line of defense.
+ */
+export async function waitForPageOwnPaintSettle(
+  page: EvaluateCapable,
+  label: string,
+  timeoutMs = 10_000
+): Promise<void> {
+  const start = Date.now();
+  let last = "";
+  while (Date.now() - start < timeoutMs) {
+    try {
+      last = await page.evaluate(PAINT_SETTLE_EXPRESSION);
+      if (last === "painted") {
+        console.log(`[paint] paint settle for "${label}": renderer produced a frame (double rAF) in ${Date.now() - start}ms`);
+        return;
+      }
+    } catch (err) {
+      last = `(evaluate error: ${(err as Error).message})`;
+    }
+    await Bun.sleep(100);
+  }
+  console.log(`[paint] paint settle for "${label}": no double-rAF confirmation within ${timeoutMs}ms (last: ${last}) — proceeding, blank-capture guard will recheck`);
+}
+
+/**
  * Wait for the target session to report a real painted frame. On overall
  * timeout, logs and returns (does not throw) — callers that screenshot
  * afterwards (e.g. `visionLocateAndClick`'s blank-frame guard) are the

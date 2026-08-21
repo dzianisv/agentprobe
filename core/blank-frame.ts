@@ -79,3 +79,53 @@ export async function captureUntilPainted(screenshotFn: () => Promise<string>, o
     `captureUntilPainted${prefix}: screen content region still ${(whiteFraction * 100).toFixed(2)}% near-white (blank/unpainted) after ${attempts} capture attempts`
   );
 }
+
+export type BufferBlankFrameOptions = {
+  /** default 0.995 — same proven threshold as BLANK_FRAME_DEFAULTS, but measured over the whole buffer (no window-chrome region to exclude on a Playwright viewport/element screenshot, unlike a full-desktop scrot). */
+  whiteFraction?: number;
+  attempts?: number; // default 3
+  retryDelayMs?: number; // default 500
+  label?: string;
+};
+
+/** Fraction of near-white pixels across an entire screenshot buffer (no content-region cropping — for callers with no browser chrome in frame, e.g. a Playwright `page.screenshot()`). */
+export async function bufferNearWhiteFraction(buf: Buffer | Uint8Array): Promise<number> {
+  const { data } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
+  let white = 0;
+  for (let i = 0; i < data.length; i++) if (data[i] >= 240) white++;
+  return white / data.length;
+}
+
+/**
+ * `captureUntilPainted`'s in-memory counterpart: call `captureFn` (expected
+ * to return a fresh screenshot buffer, e.g. Playwright's
+ * `page.screenshot()`) up to `opts.attempts` times, accepting the first
+ * capture whose whole-buffer near-white fraction is below
+ * `opts.whiteFraction`. Throws if every attempt is still blank. Used by
+ * `core/recording.ts`'s `startPageFrameCapture` so a Playwright-`Page`
+ * caller gets the same retry-until-not-blank guard as the CDP/scrot path
+ * without needing a captured file on disk or known display dimensions.
+ */
+export async function captureBufferUntilPainted(
+  captureFn: () => Promise<Buffer | Uint8Array>,
+  opts: BufferBlankFrameOptions = {}
+): Promise<{ buf: Buffer | Uint8Array; whiteFraction: number }> {
+  const attempts = opts.attempts ?? 3;
+  const retryDelayMs = opts.retryDelayMs ?? 500;
+  const whiteFractionThreshold = opts.whiteFraction ?? BLANK_FRAME_DEFAULTS.whiteFraction;
+  const prefix = opts.label ? ` "${opts.label}":` : "";
+  let lastBuf: Buffer | Uint8Array | undefined;
+  let whiteFraction = 1;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    lastBuf = await captureFn();
+    whiteFraction = await bufferNearWhiteFraction(lastBuf);
+    if (whiteFraction < whiteFractionThreshold) return { buf: lastBuf, whiteFraction };
+    console.warn(
+      `[blank-frame]${prefix} capture attempt ${attempt}/${attempts} near-white fraction=${whiteFraction.toFixed(4)} (blank threshold ${whiteFractionThreshold}) — retrying`
+    );
+    if (attempt < attempts) await Bun.sleep(retryDelayMs);
+  }
+  throw new Error(
+    `captureBufferUntilPainted${prefix}: capture still ${(whiteFraction * 100).toFixed(2)}% near-white (blank/unpainted) after ${attempts} attempts`
+  );
+}
