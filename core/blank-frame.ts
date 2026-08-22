@@ -79,14 +79,42 @@ export async function captureUntilPainted(screenshotFn: () => Promise<string>, o
   const prefix = opts.label ? ` "${opts.label}":` : "";
   let lastPath = "";
   let whiteFraction = 1;
+  let lastCaptureError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    lastPath = await screenshotFn();
+    // The capture call itself (screenshotFn) can throw -- e.g. a CDP
+    // "Unable to capture screenshot" Protocol error surfaced by an
+    // occlusion-triggered compositing blip -- and previously that throw
+    // escaped this loop on attempt 1 with zero retries (AGE-1198 / GH
+    // dzianisv/agentprobe#4272 recurrence of AGE-745). Treat a thrown
+    // capture exactly like a near-white capture: it consumes one retry
+    // attempt and only escalates to a thrown error after every attempt has
+    // failed (by either error or near-white result).
+    try {
+      lastPath = await screenshotFn();
+    } catch (err) {
+      lastCaptureError = err;
+      console.warn(
+        `[blank-frame]${prefix} capture attempt ${attempt}/${attempts} threw: ${err instanceof Error ? err.message : String(err)} — retrying`
+      );
+      if (attempt < attempts) {
+        await sleep(retryDelayMs);
+        continue;
+      }
+      break;
+    }
+    lastCaptureError = undefined;
     whiteFraction = await contentNearWhiteFraction(lastPath, opts);
     console.log(
       `[blank-frame]${prefix} capture attempt ${attempt}/${attempts} content-region near-white fraction=${whiteFraction.toFixed(4)} (blank threshold ${opts.whiteFraction})`
     );
     if (whiteFraction < opts.whiteFraction) return lastPath;
     if (attempt < attempts) await sleep(retryDelayMs);
+  }
+  if (lastCaptureError !== undefined) {
+    throw new Error(
+      `captureUntilPainted${prefix}: capture still throwing (${lastCaptureError instanceof Error ? lastCaptureError.message : String(lastCaptureError)}) after ${attempts} capture attempts`,
+      { cause: lastCaptureError }
+    );
   }
   throw new Error(
     `captureUntilPainted${prefix}: screen content region still ${(whiteFraction * 100).toFixed(2)}% near-white (blank/unpainted) after ${attempts} capture attempts`
@@ -129,14 +157,42 @@ export async function captureBufferUntilPainted(
   const prefix = opts.label ? ` "${opts.label}":` : "";
   let lastBuf: Buffer | Uint8Array | undefined;
   let whiteFraction = 1;
+  let lastCaptureError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    lastBuf = await captureFn();
+    // Same rationale as captureUntilPainted above: captureFn (typically
+    // Playwright's page.screenshot()) can throw a CDP "Unable to capture
+    // screenshot" Protocol error instead of returning a blank buffer. That
+    // throw used to escape this loop on attempt 1 -- zero retries -- and
+    // get swallowed by the outer interval/FrameRecorder try/catch
+    // (AGE-1198 / GH dzianisv/agentprobe#4272, recurrence of AGE-745).
+    // Treat it like a near-white result: consume one retry attempt, only
+    // escalate after every attempt has failed.
+    try {
+      lastBuf = await captureFn();
+    } catch (err) {
+      lastCaptureError = err;
+      console.warn(
+        `[blank-frame]${prefix} capture attempt ${attempt}/${attempts} threw: ${err instanceof Error ? err.message : String(err)} — retrying`
+      );
+      if (attempt < attempts) {
+        await sleep(retryDelayMs);
+        continue;
+      }
+      break;
+    }
+    lastCaptureError = undefined;
     whiteFraction = await bufferNearWhiteFraction(lastBuf);
     if (whiteFraction < whiteFractionThreshold) return { buf: lastBuf, whiteFraction };
     console.warn(
       `[blank-frame]${prefix} capture attempt ${attempt}/${attempts} near-white fraction=${whiteFraction.toFixed(4)} (blank threshold ${whiteFractionThreshold}) — retrying`
     );
     if (attempt < attempts) await sleep(retryDelayMs);
+  }
+  if (lastCaptureError !== undefined) {
+    throw new Error(
+      `captureBufferUntilPainted${prefix}: capture still throwing (${lastCaptureError instanceof Error ? lastCaptureError.message : String(lastCaptureError)}) after ${attempts} attempts`,
+      { cause: lastCaptureError }
+    );
   }
   throw new Error(
     `captureBufferUntilPainted${prefix}: capture still ${(whiteFraction * 100).toFixed(2)}% near-white (blank/unpainted) after ${attempts} attempts`
