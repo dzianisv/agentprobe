@@ -124,18 +124,34 @@ export async function attachAndEnable(browserWs: WebSocket, targetId: string): P
   return sessionId;
 }
 
-/** Poll the CDP target list for a page target whose URL matches `predicate`. */
+/**
+ * Poll the CDP target list for a target whose URL matches `predicate`.
+ *
+ * Defaults to `types: ["page"]` (a normal navigable tab) — the right
+ * default for the overwhelming majority of callers (a listing page, a
+ * results tab, an extension's own page). Some browser-initiated surfaces are
+ * NOT "page", though: e.g. `chrome.identity.launchWebAuthFlow()`'s
+ * interactive OAuth popup is durably reported as `type: "other"` by
+ * `Target.getTargets` (confirmed via CI diagnostics on
+ * vibebrowser/VibeWebAgent's cws-visual-install.ts — the exact same
+ * portal.vibebrowser.app/auth.html URL sat at `type: "other"` for the
+ * entire 30s poll window across multiple independent runs, not a brief
+ * transient state during creation). A caller that knows its target isn't a
+ * normal page can pass `opts.types` to widen (never narrow) the match.
+ */
 export async function findTargetByUrl(
   cdpPort: number,
   predicate: (url: string) => boolean,
   timeoutMs: number,
-  label: string
+  label: string,
+  opts: { types?: string[] } = {}
 ): Promise<CdpTarget> {
+  const allowedTypes = new Set(opts.types ?? ["page"]);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
       const targets = await listCdpTargets(cdpPort);
-      const match = targets.find((t) => t.type === "page" && predicate(t.url));
+      const match = targets.find((t) => allowedTypes.has(t.type) && predicate(t.url));
       if (match) return match;
     } catch {
       // CDP transient — retry
