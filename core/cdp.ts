@@ -125,6 +125,19 @@ export async function attachAndEnable(browserWs: WebSocket, targetId: string): P
 }
 
 /** Poll the CDP target list for a page target whose URL matches `predicate`. */
+// Interactive OAuth popups opened via `chrome.identity.launchWebAuthFlow()`
+// (the Vibe Portal sign-in tab, e.g.) are classified by CDP's
+// Target.getTargets as type "other", not "page" — confirmed empirically
+// against real CI runs (VibeWebAgent nightly-cua-cws-visual-install.yml,
+// AGE-1311/GH#1820): the target list dump on failure shows the exact
+// expected sign-in URL present and reachable, with
+// `type=other`, while the strict `t.type === "page"` filter below silently
+// excluded it, producing a misleading "tab never appeared" timeout instead
+// of a real navigation failure. Matching both types keeps normal page
+// navigation matching unchanged while no longer misclassifying a real,
+// present OAuth popup target as absent.
+const MATCHABLE_TARGET_TYPES = new Set(["page", "other"]);
+
 export async function findTargetByUrl(
   cdpPort: number,
   predicate: (url: string) => boolean,
@@ -135,7 +148,7 @@ export async function findTargetByUrl(
   while (Date.now() - start < timeoutMs) {
     try {
       const targets = await listCdpTargets(cdpPort);
-      const match = targets.find((t) => t.type === "page" && predicate(t.url));
+      const match = targets.find((t) => MATCHABLE_TARGET_TYPES.has(t.type) && predicate(t.url));
       if (match) return match;
     } catch {
       // CDP transient — retry
