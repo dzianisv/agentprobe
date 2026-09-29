@@ -11,6 +11,13 @@
 // the described element directly; only the coordinate lookup changed, the
 // click itself is still a real `xdotool mousemove` + `xdotool click`.
 //
+// A caller that already knows the target's rect in screen pixels can pass
+// it as `expectedRegion`. The model's scaled point is then cross-checked
+// against that rect; a point outside it is not clicked (a bad vision answer
+// must not silently hit a different control). A viewport rect is a different
+// coordinate space — it differs from screen pixels by the browser chrome-UI
+// offset — and is refused rather than compared.
+//
 // Canvas-size rationale (kept verbatim): per OpenAI's documented tile-based
 // image tokenization, `detail: "high"` images are scaled so the shortest
 // side becomes 768px before the model reasons over them. Pinning
@@ -89,6 +96,136 @@ export function parseClickPoint(text: string): { x: number; y: number } | undefi
   return undefined;
 }
 
+/**
+ * Relative expansion of a known screen rect before a vision point is treated
+ * as a different control. Absorbs canvas-scale rounding (the sent image is
+ * resized, then the answer is scaled back). Not a layout measurement and not
+ * specific to any site.
+ */
+export const VISION_REGION_SLACK_FRACTION = 0.1;
+
+/**
+ * Coordinate space of a caller-supplied expected rect.
+ * `screen` is the space `xdotool` clicks in (scrot pixels are screen pixels).
+ * `viewport` is DOM `getBoundingClientRect` space. Those differ by the
+ * browser chrome-UI offset; a viewport rect must not be compared to a screen
+ * click or used as a click fallback.
+ */
+export type ClickSpace = "screen" | "viewport";
+
+export type ExpectedClickRegion = {
+  space: ClickSpace;
+  rect: { x: number; y: number; width: number; height: number };
+};
+
+export type VisionRegionCheck =
+  | "not-supplied"
+  | "inside"
+  | "outside-fallback"
+  | "skipped-not-screen-space"
+  | "skipped-invalid-rect";
+
+export type VisionClickSource = "model" | "rect-centre-fallback";
+
+export type VisionClickSelection = {
+  /** Point that should be clicked, in screen pixels. */
+  point: { x: number; y: number };
+  /** Model's scaled screen point, even when it was rejected. */
+  modelPoint: { x: number; y: number };
+  source: VisionClickSource;
+  regionCheck: VisionRegionCheck;
+  logs: string[];
+};
+
+export function rectCentre(rect: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
+  return {
+    x: Math.round(rect.x + rect.width / 2),
+    y: Math.round(rect.y + rect.height / 2)
+  };
+}
+
+function isFinitePositiveRect(rect: { x: number; y: number; width: number; height: number }): boolean {
+  return [rect.x, rect.y, rect.width, rect.height].every((n) => Number.isFinite(n)) && rect.width > 0 && rect.height > 0;
+}
+
+/**
+ * Decide which screen point to click. Callers that pass no region get the
+ * model point unchanged. A region tagged anything other than `screen` is not
+ * applied — comparing a viewport rect to a screen point would reject a
+ * correct click or fall back to the wrong centre. A screen point outside the
+ * rect (plus a small relative slack) falls back to the rect centre instead of
+ * being clicked.
+ */
+export function selectVisionClickPoint(
+  modelPoint: { x: number; y: number },
+  expectedRegion: ExpectedClickRegion | undefined,
+  label: string
+): VisionClickSelection {
+  const modelOnly: VisionClickSelection = {
+    point: modelPoint,
+    modelPoint,
+    source: "model",
+    regionCheck: "not-supplied",
+    logs: []
+  };
+  if (!expectedRegion) return modelOnly;
+
+  if (expectedRegion.space !== "screen") {
+    return {
+      ...modelOnly,
+      regionCheck: "skipped-not-screen-space",
+      logs: [
+        `[vision] expected-region cross-check skipped for "${label}": caller declared space "${String(expectedRegion.space)}", not "screen". ` +
+          `A viewport rect (getBoundingClientRect) is not the screen-pixel space the click is delivered in — they differ by the browser chrome-UI offset. ` +
+          `Not comparing and not falling back to that rect. Clicking the model point (${modelPoint.x}, ${modelPoint.y}) unchecked.`
+      ]
+    };
+  }
+
+  const rect = expectedRegion.rect;
+  if (!isFinitePositiveRect(rect)) {
+    return {
+      ...modelOnly,
+      regionCheck: "skipped-invalid-rect",
+      logs: [
+        `[vision] expected-region cross-check skipped for "${label}": screen rect ${JSON.stringify(rect)} is not a finite positive area. ` +
+          `Clicking the model point (${modelPoint.x}, ${modelPoint.y}) unchecked.`
+      ]
+    };
+  }
+
+  const padX = rect.width * VISION_REGION_SLACK_FRACTION;
+  const padY = rect.height * VISION_REGION_SLACK_FRACTION;
+  const left = rect.x - padX;
+  const top = rect.y - padY;
+  const right = rect.x + rect.width + padX;
+  const bottom = rect.y + rect.height + padY;
+  const inside = modelPoint.x >= left && modelPoint.x <= right && modelPoint.y >= top && modelPoint.y <= bottom;
+  if (inside) {
+    return {
+      ...modelOnly,
+      regionCheck: "inside",
+      logs: [
+        `[vision] model point (${modelPoint.x}, ${modelPoint.y}) for "${label}" is inside expected screen rect ${JSON.stringify(rect)} ` +
+          `(expanded by ${VISION_REGION_SLACK_FRACTION} of each edge to [${left}, ${top}, ${right}, ${bottom}]); clicking the model point`
+      ]
+    };
+  }
+
+  const centre = rectCentre(rect);
+  return {
+    point: centre,
+    modelPoint,
+    source: "rect-centre-fallback",
+    regionCheck: "outside-fallback",
+    logs: [
+      `[vision] REJECTED model point (${modelPoint.x}, ${modelPoint.y}) for "${label}": outside expected screen rect ${JSON.stringify(rect)} ` +
+        `(expanded by ${VISION_REGION_SLACK_FRACTION} of each edge to [${left}, ${top}, ${right}, ${bottom}]). ` +
+        `Not clicking it. Falling back to deterministic rect centre (${centre.x}, ${centre.y}).`
+    ]
+  };
+}
+
 export type VisionLocateAndClickOptions = {
   outputDir: string;
   displayWidth: number;
@@ -96,6 +233,20 @@ export type VisionLocateAndClickOptions = {
   sendWidth?: number; // default 1366
   sendHeight?: number; // default 768
   blankGuard: BlankFrameOptions;
+  /**
+   * Optional known rect of the control being clicked. `space` is required so
+   * a viewport rect cannot be silently treated as screen pixels. Omit to keep
+   * the historical behaviour (click the model point, unchecked).
+   */
+  expectedRegion?: ExpectedClickRegion;
+};
+
+export type VisionLocateAndClickResult = {
+  x: number;
+  y: number;
+  source: VisionClickSource;
+  modelPoint: { x: number; y: number };
+  regionCheck: VisionRegionCheck;
 };
 
 /**
@@ -112,7 +263,7 @@ export async function visionLocateAndClick(
   description: string,
   label: string,
   opts: VisionLocateAndClickOptions
-): Promise<{ x: number; y: number }> {
+): Promise<VisionLocateAndClickResult> {
   const sendWidth = opts.sendWidth ?? DEFAULT_SEND_WIDTH;
   const sendHeight = opts.sendHeight ?? DEFAULT_SEND_HEIGHT;
   const slug = label.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
@@ -167,17 +318,31 @@ export async function visionLocateAndClick(
       `-> (${point.x}, ${point.y}) on the real ${opts.displayWidth}x${opts.displayHeight} screen (description: ${description})`
   );
 
-  xdotoolMouseMove(point.x, point.y);
+  // `point` is in screen pixels. Only an expected rect the caller has tagged
+  // as that same space may veto it. The click below uses `selection.point`,
+  // which is the model point unless that cross-check rejected it.
+  const selection = selectVisionClickPoint(point, opts.expectedRegion, label);
+  for (const line of selection.logs) console.log(line);
+
+  xdotoolMouseMove(selection.point.x, selection.point.y);
   await Bun.sleep(150);
   // Cheap sanity check, no longer load-bearing for correctness (the model's
   // click coordinate IS already in screen-pixel space) — kept because a real
   // X11 cursor glyph in the artifact is still useful ground truth if a run
-  // fails for some other reason.
+  // fails for some other reason. Captured at the point actually clicked,
+  // which may be the rect centre rather than the model point.
   const precheckShotPath = path.join(opts.outputDir, `${slug}-cursor-precheck.png`);
   await saveCursorScreenshot(precheckShotPath);
   xdotoolClick();
-  console.log(`[vision] xdotool clicked "${label}" at (${point.x}, ${point.y}) (vision-located)`);
-  return point;
+  const how = selection.source === "rect-centre-fallback" ? "rect-centre-fallback" : "vision-located";
+  console.log(`[vision] xdotool clicked "${label}" at (${selection.point.x}, ${selection.point.y}) (${how})`);
+  return {
+    x: selection.point.x,
+    y: selection.point.y,
+    source: selection.source,
+    modelPoint: point,
+    regionCheck: selection.regionCheck
+  };
 }
 
 export type VisionJudgeOptions = {
