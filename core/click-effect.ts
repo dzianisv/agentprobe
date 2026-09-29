@@ -2,9 +2,17 @@
 //
 // An OS-level dialog (Chrome's "Add extension?" prompt) is not in the DOM, so
 // this cannot prove that dialog opened. It CAN prove the click did something
-// else: left the page, opened an in-page modal, or covered the target. Those
-// are retry conditions. Absence of those is not positive proof — callers must
-// not describe `proof: "none"` as confirmation the click landed.
+// else: left the page, or opened an in-page modal. Those are retry conditions.
+//
+// A target that stops being topmost, or disappears, on an otherwise unchanged
+// listing is NOT one of them: that is exactly what the native prompt (which
+// dims the page) and the store's own button-to-spinner swap look like. Only
+// the navigation and new-modal signals — the misclicks this flow actually
+// produces, the Share control and its redirect — are retried.
+//
+// Absence of a retry signal is not positive proof; callers must not describe
+// `proof: "none"` or `proof: "target-yielded-to-install"` as confirmation the
+// click landed. The Preferences assertion is the proof.
 
 export type ClickTargetSnapshot = {
   text: string;
@@ -23,7 +31,7 @@ export type ClickSurfaceSnapshot = {
 
 export type ClickEffect =
   | { action: "retry"; detail: string }
-  | { action: "proceed"; proof: "target-state-changed" | "none"; detail: string };
+  | { action: "proceed"; proof: "target-state-changed" | "target-yielded-to-install" | "none"; detail: string };
 
 export type ClickSurfaceRead = ClickSurfaceSnapshot | { error: string };
 
@@ -75,11 +83,31 @@ export function classifyClickEffect(before: ClickSurfaceSnapshot, after: ClickSu
       detail: `in-page modal count rose ${before.visibleModalCount} -> ${after.visibleModalCount} (a page overlay opened; an OS-level dialog is not in the DOM)`
     };
   }
-  if (before.hitTarget && !after.hitTarget) {
-    return { action: "retry", detail: "target is no longer the topmost element at its centre (an overlay is covering it)" };
-  }
+  // Past this point the page is still the listing and no NEW in-page modal
+  // opened. A target that has gone away or stopped being topmost is then the
+  // install-pending state, not a misclick: Chrome's native "Add extension?"
+  // prompt is OS-level (invisible to CDP) and dims the page beneath it, and
+  // the store swaps the button for a spinner while the install runs. The
+  // misclicks this flow actually produces — the Share control, a redirect —
+  // are caught above by the modal-count and navigation rules, which run
+  // first precisely so they win over these two.
   if (before.target && !after.target) {
-    return { action: "retry", detail: "target element disappeared" };
+    return {
+      action: "proceed",
+      proof: "target-yielded-to-install",
+      detail:
+        "target element is gone while still on the listing with no new in-page modal — the store replaced the button (install pending). " +
+        "Not proof the native dialog opened; the Preferences assertion remains the proof."
+    };
+  }
+  if (before.hitTarget && !after.hitTarget) {
+    return {
+      action: "proceed",
+      proof: "target-yielded-to-install",
+      detail:
+        "target is no longer topmost at its centre while still on the listing with no new in-page modal — consistent with the OS-level " +
+        "install prompt dimming the page. Not proof the native dialog opened; the Preferences assertion remains the proof."
+    };
   }
   if (before.target && after.target && targetStateChanged(before.target, after.target) && after.hitTarget) {
     return {
@@ -120,7 +148,10 @@ export function verifyClickEffect(before: ClickSurfaceRead | null, after: ClickS
     };
   }
   if (!isSnapshot(before)) {
-    if (!after.onExpectedUrl || after.visibleModalCount > 0 || !after.hitTarget || !after.target) {
+    // Without a baseline only the unambiguous misclick signals count. A
+    // missing/covered target alone is also what a pending install looks
+    // like, so it must not be called a misclick here either.
+    if (!after.onExpectedUrl || after.visibleModalCount > 0) {
       return { ok: false, detail: `post-click surface looks like a misclick without a baseline (${JSON.stringify(after)})` };
     }
     return {
