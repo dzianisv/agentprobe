@@ -26,8 +26,32 @@ describe("classifyClickEffect", () => {
     expect(effect.detail).toContain("linkedin.com");
   });
 
-  test("retries when an overlay covers the target", () => {
+  test("a covered target on the unchanged listing is the install-pending state, not a misclick", () => {
+    // Chrome's native "Add extension?" prompt is OS-level: CDP cannot see it,
+    // but it dims the page, so elementFromPoint stops hitting the button.
+    // Calling that a misclick made a working click retry five times.
     const effect = classifyClickEffect(surface(), surface({ hitTarget: false }));
+    expect(effect.action).toBe("proceed");
+    if (effect.action === "proceed") {
+      expect(effect.proof).toBe("target-yielded-to-install");
+      expect(effect.detail).toContain("Not proof");
+    }
+  });
+
+  test("a covered target still retries when a new in-page modal explains it", () => {
+    const effect = classifyClickEffect(surface(), surface({ hitTarget: false, visibleModalCount: 1 }));
+    expect(effect.action).toBe("retry");
+    expect(effect.detail).toContain("modal count rose");
+  });
+
+  test("a vanished target on the unchanged listing proceeds (button swapped for a spinner)", () => {
+    const effect = classifyClickEffect(surface(), surface({ target: null, hitTarget: false }));
+    expect(effect.action).toBe("proceed");
+    if (effect.action === "proceed") expect(effect.proof).toBe("target-yielded-to-install");
+  });
+
+  test("a vanished target still retries when the page navigated away", () => {
+    const effect = classifyClickEffect(surface(), surface({ target: null, onExpectedUrl: false, url: "https://www.linkedin.com/login/" }));
     expect(effect.action).toBe("retry");
   });
 
@@ -75,6 +99,16 @@ describe("verifyClickEffect", () => {
 
   test("retries a readable in-page modal", () => {
     const result = verifyClickEffect(surface(), surface({ visibleModalCount: 1 }));
+    expect(result.ok).toBe(false);
+  });
+
+  test("without a baseline, a covered target alone is not called a misclick", () => {
+    const result = verifyClickEffect({ error: "pre-click read failed" }, surface({ hitTarget: false, target: null }));
+    expect(result.ok).toBe(true);
+  });
+
+  test("without a baseline, a navigation away is still a misclick", () => {
+    const result = verifyClickEffect({ error: "pre-click read failed" }, surface({ onExpectedUrl: false, url: "https://www.linkedin.com/login/" }));
     expect(result.ok).toBe(false);
   });
 });
