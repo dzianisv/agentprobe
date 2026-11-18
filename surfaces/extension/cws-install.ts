@@ -26,6 +26,18 @@
 // Assumes the caller has already launched Chrome (`core/chrome-process.ts`'s
 // `startChrome`) pointed at `opts.listingUrl` and that `opts.cdpPort` is
 // reachable.
+//
+// A fresh profile may land on Google's cookie-consent interstitial
+// (consent.google.com, title "Before you continue") instead of the listing —
+// the listing URL's item id is embedded in the interstitial's `continue=`
+// query parameter, so the target lookup above still matches that tab
+// (VWA#2558, CWS Release Verify run 44293381674: the probe waited the full
+// 45s for "Add to Chrome" on the consent page). The Add-to-Chrome wait
+// therefore checks for the interstitial on every poll where the install
+// button is absent and dismisses it — real xdotool click on the visible
+// "Reject all" button (fallback "Accept all"), wait for navigation back to
+// the listing, log URL before/after — before resuming the normal wait. The
+// install pass criteria below are unchanged.
 
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -45,7 +57,7 @@ import { waitForPaintSettle } from "../../core/paint";
 import { saveCursorScreenshot, saveFullScreenshot } from "../../core/screenshot";
 import { type ExpectedClickRegion, type VisionClient, type VisionLocateAndClickResult, visionLocateAndClick } from "../../core/vision";
 import { measureViewportOriginOnScreen, viewportRectToScreenRect } from "../../core/viewport-origin";
-import { xdotoolKey, xdotoolKeyRaw } from "../../core/xdotool";
+import { xdotoolClick, xdotoolKey, xdotoolKeyRaw, xdotoolMouseMove } from "../../core/xdotool";
 
 /** Existing post-click settle before the dialog screenshot / key acceptance. Not raised. */
 const POST_CLICK_OBSERVE_MS = 2_000;
@@ -79,7 +91,166 @@ function findInstallButtonJs(labelSource: string): string {
   `;
 }
 
-async function waitForAddToChromeButton(ws: WebSocket, sessionId: string, buttonText: string, timeoutMs: number): Promise<Rect> {
+/** Context the consent dismissal needs beyond the CDP session: a real click channel. */
+type ConsentDismissContext = {
+  vision: VisionClient;
+  outputDir: string;
+  displayWidth: number;
+  displayHeight: number;
+  listingUrl: string;
+  itemId: string;
+};
+
+type GoogleConsentState = {
+  url: string;
+  title: string;
+  /** Normalized label of the chosen button ("reject all" preferred, "accept all" fallback); null when neither is present. */
+  label: string | null;
+  /** Viewport rect of the chosen button; null when it is missing, hidden, or disabled. */
+  rect: Rect | null;
+};
+
+/**
+ * Read-only probe for the Google cookie-consent interstitial (VWA#2558).
+ * Detected by host `consent.google.com` OR title "Before you continue".
+ * Returns null on any other page. Never clicks anything.
+ */
+async function readGoogleConsentState(ws: WebSocket, sessionId: string): Promise<GoogleConsentState | null> {
+  const expression = `(() => {
+    const __norm = (v) => (v || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    const isConsent = location.hostname === 'consent.google.com' || __norm(document.title).includes('before you continue');
+    if (!isConsent) return JSON.stringify(null);
+    const __named = Array.from(document.querySelectorAll('button, [role="button"], a')).map((el) => ({
+      el,
+      name: __norm(el.getAttribute('aria-label') || el.textContent || '')
+    }));
+    let chosen = null;
+    let chosenLabel = null;
+    for (const label of ['reject all', 'accept all']) {
+      chosen = __named.find((x) => x.name === label) || __named.find((x) => x.name.includes(label)) || null;
+      if (chosen) { chosenLabel = label; break; }
+    }
+    if (!chosen) return JSON.stringify({ url: location.href, title: document.title, label: null, rect: null });
+    chosen.el.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = chosen.el.getBoundingClientRect();
+    const style = getComputedStyle(chosen.el);
+    const usable = r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+      && !(chosen.el.disabled || chosen.el.getAttribute('aria-disabled') === 'true');
+    return JSON.stringify({
+      url: location.href,
+      title: document.title,
+      label: chosenLabel,
+      rect: usable ? { x: r.x, y: r.y, width: r.width, height: r.height } : null
+    });
+  })()`;
+  const result = await cdpSend(ws, "Runtime.evaluate", { expression, returnByValue: true }, sessionId);
+  const raw = result?.result?.value as string | undefined;
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as GoogleConsentState | null;
+  return parsed ?? null;
+}
+
+/**
+ * Dismiss the consent interstitial with a REAL xdotool click on its visible
+ * "Reject all" (fallback "Accept all") button — same gesture discipline as
+ * the install click (CDP is read-only here; the click coordinates come from
+ * the measured viewport origin, with the vision pipeline as fallback when
+ * the origin cannot be measured). Then wait for navigation back to the CWS
+ * listing and log the dismissal with the URL before/after. Throws when the
+ * click does not return to the listing — a clear consent failure, never a
+ * silent 45s stall on the wrong page. Returns false when the interstitial
+ * shows no usable button (the caller's normal timeout diagnostics then
+ * report the page state).
+ */
+async function dismissGoogleConsent(
+  ws: WebSocket,
+  sessionId: string,
+  ctx: ConsentDismissContext,
+  state: GoogleConsentState
+): Promise<boolean> {
+  if (!state.label || !state.rect) {
+    console.log(
+      `[cws-install] google consent interstitial detected at ${state.url} (title=${JSON.stringify(state.title)}) but no usable "Reject all"/"Accept all" button was found; not clicking`
+    );
+    return false;
+  }
+  const label = state.label === "reject all" ? "Reject all" : "Accept all";
+  console.log(
+    `[cws-install] google consent interstitial detected: title=${JSON.stringify(state.title)} url=${state.url} — dismissing via the visible "${label}" button`
+  );
+
+  const probePath = path.join(ctx.outputDir, "consent-viewport-origin-probe.png");
+  const origin = await measureViewportOriginOnScreen(
+    {
+      evaluate: async (expression) => {
+        const result = await cdpSend(ws, "Runtime.evaluate", { expression, returnByValue: true }, sessionId);
+        const raw = result?.result?.value;
+        return typeof raw === "string" ? raw : undefined;
+      },
+      capturePng: async () => {
+        await waitForPaintSettle(ws, sessionId, "consent viewport-origin marker");
+        await unlink(probePath).catch(() => undefined);
+        await saveFullScreenshot(probePath);
+        try {
+          return await readFile(probePath);
+        } catch {
+          return null;
+        }
+      }
+    },
+    { expectedScreenWidth: ctx.displayWidth, expectedScreenHeight: ctx.displayHeight }
+  );
+  await waitForPaintSettle(ws, sessionId, `${label} button`);
+
+  if (origin) {
+    const screenRect = viewportRectToScreenRect(state.rect, origin, origin.devicePixelRatio);
+    const cx = Math.round(screenRect.x + screenRect.width / 2);
+    const cy = Math.round(screenRect.y + screenRect.height / 2);
+    xdotoolMouseMove(cx, cy);
+    xdotoolClick("1");
+    console.log(`[cws-install] clicked "${label}" at screen (${cx}, ${cy}) via xdotool (consent button screen rect ${JSON.stringify(screenRect)})`);
+  } else {
+    const click = await visionLocateAndClick(
+      ctx.vision,
+      `the '${label}' button on the Google cookie-consent page`,
+      `${label} button`,
+      {
+        outputDir: ctx.outputDir,
+        displayWidth: ctx.displayWidth,
+        displayHeight: ctx.displayHeight,
+        blankGuard: { ...BLANK_FRAME_DEFAULTS, width: ctx.displayWidth, height: ctx.displayHeight },
+        expectedRegion: { space: "viewport", rect: state.rect }
+      }
+    );
+    console.log(`[cws-install] clicked "${label}" via vision at (${click.x}, ${click.y}) source=${click.source} (viewport origin not measured)`);
+  }
+
+  const navTimeoutMs = 20_000;
+  const navStart = Date.now();
+  let lastHref = state.url;
+  while (Date.now() - navStart < navTimeoutMs) {
+    await Bun.sleep(500);
+    try {
+      const result = await cdpSend(ws, "Runtime.evaluate", { expression: "location.href", returnByValue: true }, sessionId);
+      const href = result?.result?.value;
+      if (typeof href === "string") {
+        lastHref = href;
+        if (isExpectedListingUrl(href, ctx.itemId, ctx.listingUrl)) {
+          console.log(`[cws-install] consent dismissed: navigated from ${state.url} to ${href}`);
+          await waitForPaintSettle(ws, sessionId, "CWS listing after consent dismissal");
+          return true;
+        }
+      }
+    } catch {
+      // Navigation in flight — the evaluate may fail mid-redirect; keep polling.
+    }
+  }
+  throw new Error(
+    `Google consent interstitial dismissal via "${label}" did not navigate back to the CWS listing within ${navTimeoutMs}ms (before: ${state.url}; still at: ${lastHref})`
+  );
+}
+
+async function waitForAddToChromeButton(ws: WebSocket, sessionId: string, buttonText: string, timeoutMs: number, consent?: ConsentDismissContext): Promise<Rect> {
   const expression = `(() => {
     ${findInstallButtonJs(JSON.stringify(buttonText))}
     if (!btn) return JSON.stringify({ found: false });
@@ -93,8 +264,9 @@ async function waitForAddToChromeButton(ws: WebSocket, sessionId: string, button
       x: rect.x, y: rect.y, width: rect.width, height: rect.height
     });
   })()`;
-  const start = Date.now();
+  let start = Date.now();
   let lastState = "";
+  let consentAttempts = 0;
   while (Date.now() - start < timeoutMs) {
     try {
       const result = await cdpSend(ws, "Runtime.evaluate", { expression, returnByValue: true }, sessionId);
@@ -108,6 +280,24 @@ async function waitForAddToChromeButton(ws: WebSocket, sessionId: string, button
       }
     } catch (err) {
       lastState = `(poll error, retrying: ${(err as Error).message})`;
+    }
+    // VWA#2558: the button is absent — the tab may be sitting on Google's
+    // cookie-consent interstitial instead of the listing. Dismiss it (capped
+    // at 2 attempts per wait so a click that never navigates cannot loop
+    // forever) and restart the wait budget so the listing gets the full
+    // timeout once it actually renders.
+    if (consent && consentAttempts < 2) {
+      let consentState: GoogleConsentState | null = null;
+      try {
+        consentState = await readGoogleConsentState(ws, sessionId);
+      } catch {
+        consentState = null;
+      }
+      if (consentState) {
+        consentAttempts += 1;
+        const dismissed = await dismissGoogleConsent(ws, sessionId, consent, consentState);
+        if (dismissed) start = Date.now();
+      }
     }
     await Bun.sleep(500);
   }
@@ -298,8 +488,17 @@ export async function installFromCws(opts: InstallFromCwsOptions): Promise<Insta
   const listingShotPath = path.join(opts.outputDir, "cws-listing-loaded.png");
   await saveFullScreenshot(listingShotPath);
 
+  const consentCtx: ConsentDismissContext = {
+    vision: opts.vision,
+    outputDir: opts.outputDir,
+    displayWidth,
+    displayHeight,
+    listingUrl: opts.listingUrl,
+    itemId: opts.itemId
+  };
+
   console.log(`[cws-install] waiting for "${buttonText}" button to become clickable...`);
-  await waitForAddToChromeButton(browserWs, sessionId, buttonText, 45_000);
+  await waitForAddToChromeButton(browserWs, sessionId, buttonText, 45_000, consentCtx);
 
   let lastViewportRect: Rect | undefined;
   let lastScreenRect: Rect | undefined;
@@ -317,7 +516,7 @@ export async function installFromCws(opts: InstallFromCwsOptions): Promise<Insta
       dismissOverlay: () => xdotoolKey("Escape"),
       click: async () => {
         await ensureOnListing(browserWs, sessionId, opts.listingUrl, opts.itemId);
-        const viewportRect = await waitForAddToChromeButton(browserWs, sessionId, buttonText, 45_000);
+        const viewportRect = await waitForAddToChromeButton(browserWs, sessionId, buttonText, 45_000, consentCtx);
         lastViewportRect = viewportRect;
         console.log(`[cws-install] button rect (viewport coords): ${JSON.stringify(viewportRect)}`);
 
