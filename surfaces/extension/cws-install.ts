@@ -59,11 +59,29 @@ const POST_CLICK_OBSERVE_MS = 2_000;
  * busy hydrating) does not abort the wait — it retries on the next poll tick
  * as long as the overall `timeoutMs` budget remains.
  */
+/**
+ * Shared in-page finder JS (string, injected into both Runtime.evaluate
+ * expressions below). Widens the old `<button>`-only exact-text match:
+ * candidates are button / [role="button"] / a, name is aria-label or
+ * textContent, whitespace-normalized and lowercased; exact name match is
+ * preferred, otherwise the first name that contains the label.
+ * Expects a `__labelSource` string expression in scope; defines `btn`.
+ */
+function findInstallButtonJs(labelSource: string): string {
+  return `
+    const __norm = (v) => (v || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    const __label = __norm(${labelSource});
+    const __named = Array.from(document.querySelectorAll('button, [role="button"], a')).map((el) => ({
+      el,
+      name: __norm(el.getAttribute('aria-label') || el.textContent || '')
+    }));
+    const btn = (__named.find((x) => x.name === __label) || __named.find((x) => __label !== '' && x.name.includes(__label)))?.el || null;
+  `;
+}
+
 async function waitForAddToChromeButton(ws: WebSocket, sessionId: string, buttonText: string, timeoutMs: number): Promise<Rect> {
   const expression = `(() => {
-    const btn = Array.from(document.querySelectorAll('button')).find(
-      (b) => (b.textContent || '').trim() === ${JSON.stringify(buttonText)}
-    );
+    ${findInstallButtonJs(JSON.stringify(buttonText))}
     if (!btn) return JSON.stringify({ found: false });
     btn.scrollIntoView({ block: 'center', inline: 'center' });
     const rect = btn.getBoundingClientRect();
@@ -93,14 +111,50 @@ async function waitForAddToChromeButton(ws: WebSocket, sessionId: string, button
     }
     await Bun.sleep(500);
   }
-  throw new Error(`"${buttonText}" button never became clickable within ${timeoutMs}ms (last DOM state: ${lastState || "none"})`);
+  // Timeout: dump full page state to the job log (quota-proof diagnostics)
+  // before throwing a compact summary. A diagnostics failure must never
+  // mask the original timeout.
+  let diagSummary = "";
+  try {
+    const diagExpression = `(() => {
+      const __norm = (v) => (v || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+      const candidates = Array.from(document.querySelectorAll('button, [role="button"], a')).map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          tag: el.tagName.toLowerCase(),
+          text: __norm(el.getAttribute('aria-label') || el.textContent || '').slice(0, 80),
+          disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
+          visible: r.width > 0 && r.height > 0
+        };
+      });
+      return JSON.stringify({
+        title: document.title,
+        url: location.href,
+        candidates,
+        bodyText: (document.body?.innerText || '').slice(0, 2000)
+      });
+    })()`;
+    const diagResult = await cdpSend(ws, "Runtime.evaluate", { expression: diagExpression, returnByValue: true }, sessionId);
+    const diagRaw = diagResult?.result?.value as string | undefined;
+    if (diagRaw) {
+      console.log(`[cws-install] install-button timeout diagnostics: ${diagRaw}`);
+      const diag = JSON.parse(diagRaw) as { title?: string; url?: string; candidates?: Array<{ tag: string; text: string; disabled: boolean }> };
+      const first5 = (diag.candidates ?? []).slice(0, 5).map((c) => `${c.tag}:"${c.text}" disabled=${c.disabled}`).join("; ");
+      diagSummary = ` title=${JSON.stringify(diag.title ?? "")} url=${diag.url ?? ""} candidates=${diag.candidates?.length ?? 0} first=[${first5}]`;
+    } else {
+      console.log("[cws-install] install-button timeout diagnostics: Runtime.evaluate returned no value");
+    }
+  } catch (diagErr) {
+    console.log(`[cws-install] install-button timeout diagnostics failed: ${(diagErr as Error).message}`);
+  }
+  throw new Error(`"${buttonText}" button never became clickable within ${timeoutMs}ms (last DOM state: ${lastState || "none"})${diagSummary}`);
 }
 
 function clickSurfaceExpression(buttonText: string, itemId: string): string {
   return `(() => {
     const buttonText = ${JSON.stringify(buttonText)};
     const itemId = ${JSON.stringify(itemId)};
-    const btn = Array.from(document.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === buttonText);
+    ${findInstallButtonJs("buttonText")}
     let hitTarget = false;
     if (btn) {
       const r = btn.getBoundingClientRect();
